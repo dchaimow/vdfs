@@ -216,17 +216,23 @@ def numba_calc_bounding_prisms(faces, vertices_white, vertices_pial, n_x, n_y, n
 
 def calc_depth_from_surfaces_voxelidx(voxelidx, 
                                       faces, vertices_white, vertices_pial, area_white, area_pial, 
-                                      bounding_prisms, method):
+                                      bounding_prisms, p=None, method='equivol'):
     """
-    This is the main function that calculates the depth of a voxel with grid coordinates given by voxelidx.
+    This is the main function that calculates the depth of a voxel with coordinates given by p.
     It numerically solves an intersection equation for the voxel center with a parametrization
     of triangular planes that move between the white and pial faces of the prisms that potentially
     contain the voxel and checks wheter this intersection in inside the triangle. The parametrization is 
-    either based on equi-volume or equi-distance depth. 
+    either based on equi-volume or equi-distance depth. The candidate prisms are given by the bounding_prisms
+    entry with 3D index voxelidx. If p is None then it is assumed that voxelidx is the voxel center
+    in voxel grid coordinates. This is generally the case when we compute the depths for all voxels in a grid.
+    In that case we use that grid and its resolution to determine the bounding prisms. If p is not None
+    bounding_prisms should have been calculated for a grid of arbitrary resolution that contains the point p and 
+    the voxelidx is the artifical voxel within wich p is contained.
     As soon as a solution is found that is inside the prism, the depth is returned.    
     """
     x_idx, y_idx, z_idx = voxelidx
-    p = np.array(voxelidx)
+    if p is None:
+        p = np.array(voxelidx)
     prism_idx = 0
     # go through all prisms that potentially contain the voxel
     while ((bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != 0) 

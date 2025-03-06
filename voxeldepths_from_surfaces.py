@@ -33,7 +33,7 @@ def load_fs_surf_in_grid(surf_file, grid_to_scanner):
     surf["vertices"] = np.array(
         fs_to_voxel.dot(np.hstack((coords, np.ones((surf["nVertices"], 1)))).T).T[:, :3]
     )
-    surf["tris"] = faces
+    surf["tris"] = np.array(faces, dtype=np.int64)
     return surf
 
 

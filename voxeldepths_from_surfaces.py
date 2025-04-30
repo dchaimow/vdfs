@@ -15,12 +15,24 @@ def load_fs_surf_in_scanner_space(surf_file):
     return surf
 
 
-def load_fs_surf_in_grid(surf_file, grid_to_scanner):
+def load_fs_surf_in_grid(surf_file, grid_to_scanner, label_file=None):
     """
     Loads a freesurfer surface and transforms coordinates from freesurfer space to grid space,
     by using the grid_to_scanner transformation (e.g. affine function a functional nifti image).
     """
-    coords, faces, volume_info = nib.freesurfer.read_geometry(surf_file, read_metadata=True)
+    # load freesurfer surface
+    coords, faces, volume_info = nib.freesurfer.read_geometry(
+        surf_file, read_metadata=True
+    )
+
+    # if label file provided
+    if label_file is not None:
+        label = nib.freesurfer.read_label(label_file)
+        vertex_mask = np.zeros(coords.shape[0], dtype=bool)
+        vertex_mask[label] = True
+        # remove all triangles that contain vertices that are not in the label
+        face_mask = np.all(vertex_mask[faces],axis=1)
+        faces = faces[face_mask]
 
     surf = dict()
     surf["nVertices"] = coords.shape[0]
@@ -340,6 +352,8 @@ def process_voxeldepth_from_surfaces(
     volume_file,
     depths_fname,
     columns_fname,
+    label_lh_fname=None,
+    label_rh_fname=None,
     method="equivol",
     upsample_factor=None,
     n_jobs=32,
@@ -373,10 +387,10 @@ def process_voxeldepth_from_surfaces(
             grid_to_scanner = voxel_to_scanner
 
         # load all surfaces in voxel space
-        surf_white_lh = load_fs_surf_in_grid(surf_white_lh_file, grid_to_scanner)
-        surf_pial_lh = load_fs_surf_in_grid(surf_pial_lh_file, grid_to_scanner)
-        surf_white_rh = load_fs_surf_in_grid(surf_white_rh_file, grid_to_scanner)
-        surf_pial_rh = load_fs_surf_in_grid(surf_pial_rh_file, grid_to_scanner)
+        surf_white_lh = load_fs_surf_in_grid(surf_white_lh_file, grid_to_scanner, label_lh_fname)
+        surf_pial_lh = load_fs_surf_in_grid(surf_pial_lh_file, grid_to_scanner, label_lh_fname)
+        surf_white_rh = load_fs_surf_in_grid(surf_white_rh_file, grid_to_scanner, label_rh_fname)
+        surf_pial_rh = load_fs_surf_in_grid(surf_pial_rh_file, grid_to_scanner, label_rh_fname)
 
         # load area files
         area_white_lh = nib.freesurfer.read_morph_data(area_white_lh_file)
@@ -408,5 +422,4 @@ def process_voxeldepth_from_surfaces(
         # if files already exist, just load them for return
         nii_depths = nib.load(depths_fname)
         nii_columns = nib.load(columns_fname)
-  
     return nii_depths, nii_columns

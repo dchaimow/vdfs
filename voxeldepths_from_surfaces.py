@@ -41,10 +41,9 @@ def load_fs_surf_in_grid(surf_file, grid_to_scanner, label_file=None):
     fs_to_scanner[:3, 3] = volume_info["cras"]
     grid_to_scanner = np.matrix(grid_to_scanner)
     fs_to_voxel = grid_to_scanner.I @ fs_to_scanner
-    surf["vertices"] = np.array(
-        fs_to_voxel.dot(np.hstack((coords, np.ones((surf["nVertices"], 1)))).T).T[:, :3]
-    )
-    surf["tris"] = faces
+    surf["vertices"] = np.array(fs_to_voxel.dot(
+        np.hstack((coords, np.ones((surf["nVertices"], 1)))).T).T[:, :3])
+    surf["tris"] = np.array(faces, dtype=np.int64)
     return surf
 
 
@@ -139,7 +138,7 @@ def find_depth_through_point(p, depth_plane_function):
         """
         ma, mb, mc = depth_plane_function(x)
         return plane_side(p, ma, mb, mc)
-
+    
     # we are interested in relative depth values between 0 and 1
     # by first finding the minimum and maximum of the function we can
     # determine the intervals where the function changes sign
@@ -153,9 +152,9 @@ def find_depth_through_point(p, depth_plane_function):
         # if there is a sign change between two grid points, we have a root in between
         if np.sign(f_x_grid[i]) != np.sign(f_x_grid[i + 1]):
             # we find the root of the function in the interval
-            x_zero = root_scalar(
-                f, method="brentq", bracket=[x_grid[i], x_grid[i + 1]]
-            ).root
+            x_zero = root_scalar(f, 
+                                 method="brentq", 
+                                 bracket=[x_grid[i], x_grid[i + 1]]).root
             # now that we have an intersection we need to check if the point is inside the 
             # triangle defined by the vertices of the depth plane
             ma, mb, mc = depth_plane_function(x_zero)
@@ -185,8 +184,8 @@ def numba_calc_bounding_prisms(faces, vertices_white, vertices_pial, n_x, n_y, n
     # voxel indices that contain the prism and add the prism index to lists of all these voxels
     for i_prism, prism_vertices_indcs in enumerate(faces):
         prism_points = np.concatenate(
-            (vertices_white[prism_vertices_indcs], vertices_pial[prism_vertices_indcs])
-        )
+            (vertices_white[prism_vertices_indcs], vertices_pial[prism_vertices_indcs]))
+        
         # find bounding box in voxel space
         max_x_idx = int(np.round(np.max(prism_points[:, 0])))
         min_x_idx = int(np.round(np.min(prism_points[:, 0])))
@@ -211,54 +210,45 @@ def numba_calc_bounding_prisms(faces, vertices_white, vertices_pial, n_x, n_y, n
                 for z_idx in z_idx_range:
                     # find next available list index
                     # first check if the index list of any voxel is full already
-                    available_indcs = np.argwhere(
-                        bounding_prisms[x_idx, y_idx, z_idx, :] == 0
-                    )
+                    available_indcs = np.argwhere(bounding_prisms[x_idx, y_idx, z_idx, :] == 0)
                     if available_indcs.size == 0:
                         # if full, extend the prism list by doubling its length
                         old_length = int(bounding_prisms.shape[3])
-                        bounding_prisms = np.concatenate(
-                            (
-                                bounding_prisms,
-                                np.zeros((n_x, n_y, n_z, old_length), dtype=np.int64),
-                            ),
-                            axis=3,
-                        )
+                        bounding_prisms = np.concatenate((bounding_prisms,
+                                                          np.zeros((n_x, n_y, n_z, old_length),
+                                                                    dtype=np.int64)),
+                                                          axis=3)
                         next_available_idx = old_length
                     else:
                         next_available_idx = int(available_indcs[0][0])
                     # add prism index to the list of the voxel
-                    bounding_prisms[x_idx, y_idx, z_idx, next_available_idx] = int(
-                        i_prism
-                    )
+                    bounding_prisms[x_idx, y_idx, z_idx, next_available_idx] = int(i_prism)
     return bounding_prisms
 
 
-def calc_depth_from_surfaces_voxelidx(
-    voxelidx,
-    faces,
-    vertices_white,
-    vertices_pial,
-    area_white,
-    area_pial,
-    bounding_prisms,
-    method,
-):
+def calc_depth_from_surfaces_voxelidx(voxelidx, 
+                                      faces, vertices_white, vertices_pial, area_white, area_pial, 
+                                      bounding_prisms, p=None, method='equivol'):
     """
-    This is the main function that calculates the depth of a voxel.
+    This is the main function that calculates the depth of a voxel with coordinates given by p.
     It numerically solves an intersection equation for the voxel center with a parametrization
     of triangular planes that move between the white and pial faces of the prisms that potentially
     contain the voxel and checks wheter this intersection in inside the triangle. The parametrization is 
-    either based on equi-volume or equi-distance depth. 
+    either based on equi-volume or equi-distance depth. The candidate prisms are given by the bounding_prisms
+    entry with 3D index voxelidx. If p is None then it is assumed that voxelidx is the voxel center
+    in voxel grid coordinates. This is generally the case when we compute the depths for all voxels in a grid.
+    In that case we use that grid and its resolution to determine the bounding prisms. If p is not None
+    bounding_prisms should have been calculated for a grid of arbitrary resolution that contains the point p and 
+    the voxelidx is the artifical voxel within wich p is contained.
     As soon as a solution is found that is inside the prism, the depth is returned.    
     """
     x_idx, y_idx, z_idx = voxelidx
-    p = np.array(voxelidx)
+    if p is None:
+        p = np.array(voxelidx)
     prism_idx = 0
     # go through all prisms that potentially contain the voxel
-    while (
-        bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != 0
-    ) and prism_idx < bounding_prisms.shape[3]:
+    while ((bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != 0) 
+           and prism_idx < bounding_prisms.shape[3]):
         # get vertices of the prism 
         canditate_prism_idx = bounding_prisms[x_idx, y_idx, z_idx, prism_idx]
         a1 = vertices_white[faces[canditate_prism_idx, 0], :]
@@ -277,13 +267,11 @@ def calc_depth_from_surfaces_voxelidx(
             ap_b = area_pial[faces[canditate_prism_idx, 1]]
             ap_c = area_pial[faces[canditate_prism_idx, 2]]
 
-            depth_plane_function = lambda beta: equivol_plane(
-                a1, b1, c1, a2, b2, c2, beta, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c
-            )
+            depth_plane_function = lambda beta: equivol_plane(a1, b1, c1, a2, b2, c2, beta, 
+                                                              aw_a, aw_b, aw_c, 
+                                                              ap_a, ap_b, ap_c)
         elif method == "equidist":
-            depth_plane_function = lambda alpha: equidist_plane(
-                a1, b1, c1, a2, b2, c2, alpha
-            )
+            depth_plane_function = lambda alpha: equidist_plane(a1, b1, c1, a2, b2, c2, alpha)
         # find depth through voxel center 
         # (by solving intersection equation and checking if the intersection is inside the prism)
         d = find_depth_through_point(p, depth_plane_function)
@@ -310,9 +298,8 @@ def numba_assign_calc_depth_results(results, roi, grid_size):
     return depths, columns
 
 
-def calc_depth_from_surfaces_on_grid(
-    surf_white, area_white, surf_pial, area_pial, n_x, n_y, n_z, method, n_jobs=32
-):
+def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pial,
+                                     n_x, n_y, n_z, method, n_jobs=32):
     """
     Calculate voxel grid depths from surfaces given all surface information (assumed to be in voxel grid space)
     """
@@ -322,9 +309,9 @@ def calc_depth_from_surfaces_on_grid(
 
     # For each voxel, calculate a list of prism indices that potentially contain the voxel
     # so that we only to solve intersection equations for these prisms
-    bounding_prisms = numba_calc_bounding_prisms(
-        faces, vertices_white, vertices_pial, n_x, n_y, n_z
-    )
+    bounding_prisms = numba_calc_bounding_prisms(faces,
+                                                 vertices_white, vertices_pial,
+                                                 n_x, n_y, n_z)
 
     # only need to calculate depths for voxels that potentially are inside a prism
     roi = np.argwhere(np.any(bounding_prisms, axis=3))
@@ -343,17 +330,12 @@ def calc_depth_from_surfaces_on_grid(
                         area_white,
                         area_pial,
                         bounding_prisms,
-                        method,
-                    )
-                )(roi_idx)
-                for roi_idx in roi
-            )
-        )
+                        method)
+                )(roi_idx) for roi_idx in roi))
 
     # take results from parallel calculation and assign them to the correct voxel in the grid
     depths, columns = numba_assign_calc_depth_results(
-        results, roi, bounding_prisms.shape[:3]
-    )
+        results, roi, bounding_prisms.shape[:3])
 
     return depths, columns
 
@@ -375,19 +357,15 @@ def process_voxeldepth_from_surfaces(
     method="equivol",
     upsample_factor=None,
     n_jobs=32,
-    force=False,
-):
+    force=False):
     """
     Calculate voxel depths from surfaces and save to nifti files.
     This function is the entry function for the voxeldepths_from_surfaces.py script.
     It loads the surfaces and areas, calculates the depths and saves them to nifti files.
     """
-    if (
-        not os.path.isfile(depths_fname)
+    if (not os.path.isfile(depths_fname)
         or not os.path.isfile(columns_fname)
-        or force == True
-    ):
-
+        or force == True):
         # load volume for wich to calculate voxel depths
         # and get voxel to scanner transformation
         volume = nib.load(volume_file)
@@ -400,13 +378,10 @@ def process_voxeldepth_from_surfaces(
             n_y = int(np.floor(n_y * upsample_factor))
             n_z = int(np.floor(n_z * upsample_factor))
             upsampled_to_voxel = np.matrix(
-                [
-                    [1 / upsample_factor, 0, 0, -0.5 + 1 / (2 * upsample_factor)],
-                    [0, 1 / upsample_factor, 0, -0.5 + 1 / (2 * upsample_factor)],
-                    [0, 0, 1 / upsample_factor, -0.5 + 1 / (2 * upsample_factor)],
-                    [0, 0, 0, 1],
-                ]
-            )
+                [[1 / upsample_factor,                   0,                   0, -0.5 + 1 / (2 * upsample_factor)],
+                 [                  0, 1 / upsample_factor,                   0, -0.5 + 1 / (2 * upsample_factor)],
+                 [                  0,                   0, 1 / upsample_factor, -0.5 + 1 / (2 * upsample_factor)],
+                 [                  0,                   0,                   0,                                1]])
             grid_to_scanner = voxel_to_scanner @ upsampled_to_voxel
         else:
             grid_to_scanner = voxel_to_scanner
@@ -431,8 +406,7 @@ def process_voxeldepth_from_surfaces(
 
         # calc voxel depths
         depths, columns = calc_depth_from_surfaces_on_grid(
-            surf_white, area_white, surf_pial, area_pial, n_x, n_y, n_z, method, n_jobs
-        )
+            surf_white, area_white, surf_pial, area_pial, n_x, n_y, n_z, method, n_jobs)
 
         # generate output nifti using affine of the used voxel grid (upsampled or not)
         xform = grid_to_scanner
@@ -448,5 +422,4 @@ def process_voxeldepth_from_surfaces(
         # if files already exist, just load them for return
         nii_depths = nib.load(depths_fname)
         nii_columns = nib.load(columns_fname)
-
     return nii_depths, nii_columns

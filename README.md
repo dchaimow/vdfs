@@ -14,6 +14,7 @@ vdfs.process_voxeldepth_from_surfaces(surf_white_lh_file,area_white_lh_file,
                                       surf_pial_rh_file,area_pial_rh_file,
                                       volume_file,
                                       depths_fname,columns_fname,
+                                      label_lh_fname=None,label_rh_fname=None,
                                       method='equivol',
                                       upsample_factor=None,n_jobs=32,force=False)
 ```
@@ -39,6 +40,10 @@ vdfs.process_voxeldepth_from_surfaces(surf_white_lh_file,area_white_lh_file,
 `depths_fname`: filename of output depths file
 
 `columns_fname`: filename of output columns file (face number that each voxel's center belongs to)
+
+`label_lh_fname`: optional freesurfer left label file, depth calculation will be restricted to label vertices
+
+`label_rh_fname`: optional freesurfer right label file, depth calculation will be restricted to label vertices
 
 `method` : 'equivol' or 'equidist'
 

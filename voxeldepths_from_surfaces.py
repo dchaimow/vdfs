@@ -387,10 +387,17 @@ def process_voxeldepth_from_surfaces(
             grid_to_scanner = voxel_to_scanner
 
         # load all surfaces in voxel space
-        surf_white_lh = load_fs_surf_in_grid(surf_white_lh_file, grid_to_scanner, label_lh_fname)
-        surf_pial_lh = load_fs_surf_in_grid(surf_pial_lh_file, grid_to_scanner, label_lh_fname)
-        surf_white_rh = load_fs_surf_in_grid(surf_white_rh_file, grid_to_scanner, label_rh_fname)
-        surf_pial_rh = load_fs_surf_in_grid(surf_pial_rh_file, grid_to_scanner, label_rh_fname)
+        if label_lh_fname is not None or label_rh_fname is not None:
+            surf_white_lh = load_fs_surf_in_grid(surf_white_lh_file, grid_to_scanner, label_lh_fname)
+            surf_pial_lh = load_fs_surf_in_grid(surf_pial_lh_file, grid_to_scanner, label_lh_fname)
+            surf_white_rh = load_fs_surf_in_grid(surf_white_rh_file, grid_to_scanner, label_rh_fname)
+            surf_pial_rh = load_fs_surf_in_grid(surf_pial_rh_file, grid_to_scanner, label_rh_fname)
+        else:
+            surf_white_lh = load_fs_surf_in_grid(surf_white_lh_file, grid_to_scanner)
+            surf_pial_lh = load_fs_surf_in_grid(surf_pial_lh_file, grid_to_scanner)
+            surf_white_rh = load_fs_surf_in_grid(surf_white_rh_file, grid_to_scanner)
+            surf_pial_rh = load_fs_surf_in_grid(surf_pial_rh_file, grid_to_scanner)
+
 
         # load area files
         area_white_lh = nib.freesurfer.read_morph_data(area_white_lh_file)
@@ -398,11 +405,22 @@ def process_voxeldepth_from_surfaces(
         area_white_rh = nib.freesurfer.read_morph_data(area_white_rh_file)
         area_pial_rh = nib.freesurfer.read_morph_data(area_pial_rh_file)
 
-        # merge hemispheres
-        surf_white = merge_surfaces(surf_white_lh, surf_white_rh)
-        surf_pial = merge_surfaces(surf_pial_lh, surf_pial_rh)
-        area_white = np.concatenate((area_white_lh, area_white_rh), axis=0)
-        area_pial = np.concatenate((area_pial_lh, area_pial_rh), axis=0)
+        # merge hemispheres (but if labels are provided, only use the hemisphere with labels)
+        if label_lh_fname is not None and label_rh_fname is None:
+            surf_white = surf_white_lh
+            surf_pial = surf_pial_lh
+            area_white = area_white_lh
+            area_pial = area_pial_lh
+        elif label_rh_fname is not None and label_lh_fname is None:
+            surf_white = surf_white_rh
+            surf_pial = surf_pial_rh
+            area_white = area_white_rh
+            area_pial = area_pial_rh
+        else:               
+            surf_white = merge_surfaces(surf_white_lh, surf_white_rh)
+            surf_pial = merge_surfaces(surf_pial_lh, surf_pial_rh)
+            area_white = np.concatenate((area_white_lh, area_white_rh), axis=0)
+            area_pial = np.concatenate((area_pial_lh, area_pial_rh), axis=0)
 
         # calc voxel depths
         depths, columns = calc_depth_from_surfaces_on_grid(

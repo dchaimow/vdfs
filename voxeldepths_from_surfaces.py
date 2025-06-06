@@ -330,6 +330,7 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
                         area_white,
                         area_pial,
                         bounding_prisms,
+                        None,
                         method)
                 )(roi_idx) for roi_idx in roi))
 

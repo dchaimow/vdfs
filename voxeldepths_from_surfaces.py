@@ -45,6 +45,36 @@ def read_label_vertices(label_file):
     return nib.freesurfer.read_label(label_file)
 
 
+def calc_vertex_area(coords, faces):
+    """
+    Calculates the area of each vertex as one third of the summed areas of all triangles that contain it.
+    This is identical to the freesurfer ?h.area and ?h.area.pial files (up to float32 precision).
+    Coordinates should be in mm (i.e. not in voxel grid space) and all faces of the surface should be
+    included (i.e. before restricting to a label).
+    """
+    coords = np.asarray(coords, dtype=np.float64)
+    faces = np.asarray(faces, dtype=np.int64)
+    v0, v1, v2 = coords[faces[:, 0]], coords[faces[:, 1]], coords[faces[:, 2]]
+    face_area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
+    area = np.zeros(coords.shape[0])
+    for i in range(3):
+        np.add.at(area, faces[:, i], face_area / 3)
+    return area
+
+
+def load_vertex_area(area_file=None, surf_file=None):
+    """
+    Loads vertex areas from a freesurfer area file (e.g. lh.area) or a gifti metric file. If no area file
+    is provided, the vertex areas are calculated from the surface (see calc_vertex_area).
+    """
+    if area_file is not None:
+        if is_gifti(area_file):
+            return nib.load(area_file).agg_data()
+        return nib.freesurfer.read_morph_data(area_file)
+    coords, faces, _ = read_surf_geometry(surf_file)
+    return calc_vertex_area(coords, faces)
+
+
 def load_fs_surf_in_scanner_space(surf_file):
     """
     Loads a freesurfer or gifti surface in scanner space (only doing freesurfer to scanner transformation).
@@ -473,11 +503,11 @@ def process_voxeldepth_from_surfaces(
             surf_pial_rh = load_fs_surf_in_grid(surf_pial_rh_file, grid_to_scanner)
 
 
-        # load area files
-        area_white_lh = nib.freesurfer.read_morph_data(area_white_lh_file)
-        area_pial_lh = nib.freesurfer.read_morph_data(area_pial_lh_file)
-        area_white_rh = nib.freesurfer.read_morph_data(area_white_rh_file)
-        area_pial_rh = nib.freesurfer.read_morph_data(area_pial_rh_file)
+        # load area files (or calculate areas from the surfaces in mm and with all triangles)
+        area_white_lh = load_vertex_area(area_white_lh_file, surf_white_lh_file)
+        area_pial_lh = load_vertex_area(area_pial_lh_file, surf_pial_lh_file)
+        area_white_rh = load_vertex_area(area_white_rh_file, surf_white_rh_file)
+        area_pial_rh = load_vertex_area(area_pial_rh_file, surf_pial_rh_file)
 
         # merge hemispheres (but if labels are provided, only use the hemisphere with labels)
         if label_lh_fname is not None and label_rh_fname is None:

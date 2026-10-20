@@ -444,6 +444,55 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
     return depths, columns
 
 
+def voxeldepths_from_surfaces(
+    surf_white_lh_file,
+    surf_pial_lh_file,
+    surf_white_rh_file,
+    surf_pial_rh_file,
+    volume_file,
+    depths_fname,
+    columns_fname,
+    *,
+    label_lh_fname=None,
+    label_rh_fname=None,
+    method="equivol",
+    upsample_factor=None,
+    n_jobs=32,
+    force=False):
+    """
+    Calculate voxel depths from surfaces and save them to nifti files (main entry function).
+
+    Surfaces can be freesurfer (e.g. lh.white, lh.pial) or gifti (.gii) files. Freesurfer surface
+    coordinates are transformed to scanner space using the c_ras stored in the surface file, gifti
+    surface coordinates are assumed to already be in scanner space.
+    Vertex areas (needed for method="equivol") are calculated from the surfaces, which gives the same
+    values as the freesurfer ?h.area and ?h.area.pial files. To use area files instead, use
+    process_voxeldepth_from_surfaces.
+
+    surf_white_lh_file, surf_pial_lh_file, surf_white_rh_file, surf_pial_rh_file: surface files
+    volume_file: nifti file that determines the voxel grid and affine of the output
+    depths_fname: output nifti file with voxel depths (0 = white, 1 = pial, NaN outside of the ribbon)
+    columns_fname: output nifti file with the index of the triangle (prism) that contains each voxel center
+        (if both hemispheres are used, right hemisphere triangle indices are offset by the number of
+        left hemisphere triangles)
+    label_lh_fname, label_rh_fname: optional freesurfer label or gifti mask (.gii, nonzero vertices) files
+        that restrict the calculation to triangles inside the label. If a label is provided for only one
+        hemisphere, the other hemisphere is ignored.
+    method: "equivol" (equi-volume) or "equidist" (equi-distance) depths
+    upsample_factor: optional upsampling of the voxel grid
+    n_jobs: number of parallel jobs
+    force: if False and both output files exist, they are loaded instead of recalculated
+
+    Returns the depths and columns nifti images.
+    """
+    return process_voxeldepth_from_surfaces(
+        surf_white_lh_file, None, surf_pial_lh_file, None,
+        surf_white_rh_file, None, surf_pial_rh_file, None,
+        volume_file, depths_fname, columns_fname,
+        label_lh_fname=label_lh_fname, label_rh_fname=label_rh_fname, method=method,
+        upsample_factor=upsample_factor, n_jobs=n_jobs, force=force)
+
+
 def process_voxeldepth_from_surfaces(
     surf_white_lh_file,
     area_white_lh_file,
@@ -463,9 +512,13 @@ def process_voxeldepth_from_surfaces(
     n_jobs=32,
     force=False):
     """
-    Calculate voxel depths from surfaces and save to nifti files.
-    This function is the entry function for the voxeldepths_from_surfaces.py script.
-    It loads the surfaces and areas, calculates the depths and saves them to nifti files.
+    Calculate voxel depths from surfaces and vertex area files and save them to nifti files.
+
+    Same as voxeldepths_from_surfaces, but with an area file following each surface file
+    (original interface of vdfs <= 1.0, kept for compatibility and for using precomputed areas).
+    Area files can be freesurfer (e.g. lh.area, lh.area.pial) or gifti metric files. If an area file is
+    None, the vertex areas are calculated from the corresponding surface (identical to the freesurfer
+    area files). New code should use voxeldepths_from_surfaces, which does not need area files.
     """
     if (not os.path.isfile(depths_fname)
         or not os.path.isfile(columns_fname)
@@ -545,3 +598,7 @@ def process_voxeldepth_from_surfaces(
         nii_depths = nib.load(depths_fname)
         nii_columns = nib.load(columns_fname)
     return nii_depths, nii_columns
+
+
+# name used in fmri_analysis before vdfs was a separate package
+process_dc_voxeldepth_from_surfaces = process_voxeldepth_from_surfaces

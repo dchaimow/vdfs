@@ -28,6 +28,9 @@ def read_surf_geometry(surf_file):
         coords, faces, volume_info = nib.freesurfer.read_geometry(
             surf_file, read_metadata=True
         )
+        if "cras" not in volume_info:
+            raise ValueError(f"freesurfer surface {surf_file} contains no volume info (c_ras), "
+                             "cannot transform it to scanner space")
         fs_to_scanner[:3, 3] = volume_info["cras"]
     return coords, faces, fs_to_scanner
 

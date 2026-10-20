@@ -1,0 +1,447 @@
+<title>vdfs Equivolume Validation</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,500;7..72,600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (~68ch) with wide figure bands; charts as small multiples in a wrapping grid */
+:root {
+  --bg: #fbfbfa; --surface: #ffffff; --fg: #15171a; --fg-2: #4a4e55; --muted: #7a7f88;
+  --rule: #e2e4e8; --grid: #e9eaed; --axis: #c3c6cc; --accent: #1c5cab; --code-bg: #f1f2f4; --note-bg: #eef4fc;
+  --s-wagstyl: #2a78d6; --s-current: #eb6834; --s-laynii: #1baf7a; --s-quadratic: #eda100; --s-ref: #8a8e96;
+  --show-light: block; --show-dark: none;
+  --f-display: "Literata", Georgia, "Times New Roman", serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121315; --surface: #1a1a19; --fg: #eceef1; --fg-2: #b9bdc4; --muted: #898e97;
+  --rule: #2c2e32; --grid: #2a2b2e; --axis: #3d4046; --accent: #86b6ef; --code-bg: #1f2124; --note-bg: #17202b;
+  --s-wagstyl: #3987e5; --s-current: #d95926; --s-laynii: #199e70; --s-quadratic: #c98500; --s-ref: #8a8e96;
+  --show-light: none; --show-dark: block; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121315; --surface: #1a1a19; --fg: #eceef1; --fg-2: #b9bdc4; --muted: #898e97;
+  --rule: #2c2e32; --grid: #2a2b2e; --axis: #3d4046; --accent: #86b6ef; --code-bg: #1f2124; --note-bg: #17202b;
+  --s-wagstyl: #3987e5; --s-current: #d95926; --s-laynii: #199e70; --s-quadratic: #c98500; --s-ref: #8a8e96;
+  --show-light: none; --show-dark: block; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 16px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 1120px; margin: 0 auto; padding-block: 40px 80px; display: grid; gap: 56px; }
+section { display: grid; gap: 16px; min-width: 0; }
+.prose { max-width: 68ch; display: grid; gap: 12px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 44px); }
+h2 { font-size: 26px; padding-top: 16px; border-top: 1px solid var(--rule); }
+h3 { font-size: 18px; font-family: var(--f-body); }
+p, ul, ol { margin: 0; }
+ul, ol { padding-left: 1.3em; display: grid; gap: 6px; }
+a { color: var(--accent); }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font-family: var(--f-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.lede { font-size: 18px; color: var(--fg-2); max-width: 68ch; }
+.meta { font-size: 13px; color: var(--muted); font-family: var(--f-mono); }
+.findings { display: grid; gap: 10px; max-width: 80ch; padding: 20px 22px; background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 6px; }
+.findings li::marker { color: var(--muted); }
+.note { max-width: 80ch; padding: 14px 18px; background: var(--note-bg); border-radius: 6px; font-size: 15px; display: grid; gap: 6px; }
+.note b { font-weight: 600; }
+.formula, pre.cmd { font-family: var(--f-mono); font-size: 14px; background: var(--code-bg); padding: 10px 14px;
+  border-radius: 4px; overflow-x: auto; white-space: pre; margin: 0; }
+figure { margin: 0; display: grid; gap: 10px; min-width: 0; }
+figure img { width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); }
+img.fig-light { display: var(--show-light); }
+img.fig-dark { display: var(--show-dark); }
+figcaption { font-size: 14px; color: var(--fg-2); max-width: 90ch; }
+figcaption b { color: var(--fg); }
+.table-wrap { overflow-x: auto; min-width: 0; }
+table { border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; width: 100%; min-width: 560px; }
+th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; white-space: normal; }
+thead th { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.03em; vertical-align: bottom; }
+td.best { font-weight: 600; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px 28px; }
+.chart { display: grid; gap: 4px; min-width: 0; position: relative; align-content: start; }
+.chart h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--fg-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; }
+.legend i.dash { border-top-style: dashed; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); color: var(--fg); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 6px 9px; font-size: 12px; line-height: 1.45; box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  font-variant-numeric: tabular-nums; white-space: nowrap; z-index: 2; }
+.tip b { font-weight: 600; }
+details { font-size: 14px; }
+summary { cursor: pointer; color: var(--fg-2); }
+details .table-wrap { margin-top: 8px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px 32px; }
+.grid2 > * { min-width: 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<main>
+  <header style="display:grid; gap:14px;">
+    <div class="eyebrow">vdfs · equi-volume depth test on synthetic surfaces</div>
+    <h1>Does the vdfs equi-volume formula preserve volume?</h1>
+    <p class="lede">A comparison of the formula currently used in vdfs with the surface_tools formula by Konrad Wagstyl, and with LayNii's voxel-based equi-volume layering. Depths are computed for synthetic white and pial surfaces with known geometry and checked against the exact equi-volume depths and by counting voxels per depth bin.</p>
+    <p class="meta">Denis Chaimow · 21 October 2026 · vdfs 1.1.0 · LayNii 2.9.0 (523058c) · voxel size 0.125 mm · third version</p>
+  </header>
+
+  <div class="note">
+    <p><b>Correction to the first version of this report.</b> The first version built the LayNii rim incorrectly: it labelled voxels outside the grey matter as borders (LayNii expects the outermost grey matter voxels), and in the voxel boxes used for vdfs it decided the side of each border voxel from the exact geometry instead of the mesh. This put false pial border voxels right next to the white surface and produced plateaus in LayNii's depths, which the first version wrongly attributed to the ribbon being cut by the volume boundary. It also ran LayNii only with its default smoothing. All LayNii results below use a corrected rim and two smoothing levels; the section on how LayNii was run describes the procedure and its sensitivity.</p>
+  </div>
+
+  <section>
+    <h2>Summary</h2>
+    <ul class="findings">
+      <li><b>A quadratic area model makes vdfs' equi-volume depths exact.</b> Using the area of the midthickness surface (the average of white and pial vertices) in addition to the white and pial areas, the cross-sectional area of each column is modelled as quadratic in depth. Its depth errors (rms 0.0003–0.002, max 0.004) are as small as the error from approximating the surfaces by triangles, and its voxel counts match those of the exact depths in every patch.</li>
+      <li><b>The Wagstyl formula preserves volume closely, but not exactly.</b> Voxel counts per depth bin stay within 0.2–1.0 percentage points of the ideal 10%, with rms depth errors of 0.0004–0.015. In the cylinder it is exact up to the triangle approximation (rms 0.001); in spheres and strongly curved parts of the folded sheet a small error remains, because there the area grows quadratically with depth, not linearly as the formula assumes.</li>
+      <li><b>The current vdfs formula is close but systematically off.</b> Every curved geometry shows the same pattern: too many voxels at mid-depth and too few near the white and pial surfaces. Its rms errors are 1.6–4.5 times larger than those of the Wagstyl formula, with maximum errors up to 0.050 in the folded-sheet trough. Its mean error is near zero, which is why the results looked plausible.</li>
+      <li><b>Both are far better than no correction:</b> equi-distance depths deviate by up to 6.4 percentage points per bin and 0.20 in depth.</li>
+      <li><b>LayNii's equi-volume layering is less accurate than the vdfs equi-volume variants and depends strongly on its settings.</b> With default smoothing (100 iterations) its rms errors are 0.013–0.088. With 1000 iterations and a ribbon that is not cut near the evaluated region, it reaches 0.014–0.018 in the concentric shells, but in the folded sheet it corrects only part of the equi-distance bias (rms 0.043 at the crest, 0.074 in the trough, no correction at the saddle). Near a cut through the ribbon (small voxel boxes) its correction largely fails.</li>
+      <li><b>A vdfs robustness gap showed up:</b> voxel centres lying exactly on a boundary between prisms can get no depth. It only happens with exact alignments, such as symmetric synthetic meshes.</li>
+    </ul>
+    <div class="table-wrap" id="summary-table"></div>
+  </section>
+
+  <section>
+    <h2>The two formulas</h2>
+    <div class="prose">
+      <p>For an equi-volume depth β (the fraction of the local cortical volume between the white surface and the point), vdfs needs the distance fraction α at each vertex, given that vertex's area on the white surface (a<sub>w</sub>) and on the pial surface (a<sub>p</sub>). The intermediate surface at depth β passes through <code>white + α · (pial − white)</code> at every vertex.</p>
+      <p>The formula in vdfs since the 2021 MATLAB prototype:</p>
+      <div class="formula">α = (2 a_p β − a_p β² + a_w β²) / (a_p + a_w)</div>
+      <p>The surface_tools formula, converted to depths measured from the white surface:</p>
+      <div class="formula">α = (−a_w + √((1 − β) a_w² + β a_p²)) / (a_p − a_w)</div>
+      <p>surface_tools assumes that the area changes linearly with distance between the white and pial surfaces, and its formula is the exact equi-volume solution under that assumption. The current vdfs formula is the algebraic inverse of surface_tools' function. surface_tools uses the letters the other way round (α for volume, β for distance) and measures from the pial surface, and inverting the formula turned "volume in, distance out" into "distance in, volume out". Measuring from the other surface largely compensates for this: the two formulas agree to first order in the area difference, but not in the second-order term.</p>
+      <p>The linear-area model goes back to Waehnert et al. (2014), whose Eq. (10) is the formula above (with α for volume and ρ for distance). They modelled cortical segments in 3D as truncated cones with end areas derived from both principal curvatures of the white and pial surfaces, and then assumed that "the area grows linearly with the height of the segment column", noting that this "describes an approximation of the actual cortical shape" and that it "balanced robustness, accuracy and precision best" among the models they tried and gives a closed-form solution.</p>
+      <p>The charts show how far each formula moves the intermediate surface away from the equi-distance position (α − β), for a vertex whose pial area is 3 times or one third of its white area.</p>
+    </div>
+    <div class="charts" id="formula-charts"></div>
+    <div class="prose">
+      <h3>An exact area model for vdfs</h3>
+      <p>vdfs builds intermediate surfaces by moving each vertex along the straight line from its white to its pial position. A triangle whose vertices move linearly has an area that is quadratic in the distance fraction α (exactly so when the white and pial triangles are parallel):</p>
+      <div class="formula">A(α) = a_w (1 − α)² + 2 a_m α (1 − α) + a_p α²</div>
+      <p>The middle coefficient follows from the area a<sub>mid</sub> of the midthickness surface, the linear morph at α = 0.5: a<sub>m</sub> = 2 a<sub>mid</sub> − (a<sub>w</sub> + a<sub>p</sub>)/2. The linear model is the special case a<sub>mid</sub> = (a<sub>w</sub> + a<sub>p</sub>)/2. The volume fraction below α is then a cubic in α, which vdfs solves with a few Newton steps. For a sphere a<sub>m</sub> = √(a<sub>w</sub> a<sub>p</sub>) and the model reproduces the exact volume; for a cylinder a<sub>mid</sub> is the average and it reduces to the Wagstyl formula. On a real FreeSurfer subject, a<sub>mid</sub> deviates from (a<sub>w</sub> + a<sub>p</sub>)/2 by −11% to +5% (5th–95th percentile of vertices), so the quadratic term matters in real cortex. FreeSurfer's own <code>?h.area.mid</code> cannot be used for this: recon-all computes it as (area + area.pial)/2.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Test setup</h2>
+    <div class="grid2">
+      <div class="prose">
+        <h3>Geometries and exact depths</h3>
+        <ul>
+          <li><b>Sphere, gyral crown:</b> white r = 4 mm, pial r = 7 mm (pial/white area 3.06).</li>
+          <li><b>Sphere, sulcal fundus:</b> pial r = 3 mm inside, white r = 6 mm outside (area ratio 0.25).</li>
+          <li><b>Cylinder, crown:</b> white r = 4 mm, pial r = 7 mm (area ratio 1.75). Area grows linearly with radius, so the Wagstyl formula should be exact.</li>
+          <li><b>Folded sheet:</b> white surface z = 2 cos(kx) cos(ky) with 20 mm wavelength; the pial surface is its parallel surface 3 mm along the normal. It contains a crest, a trough, a flank and a saddle.</li>
+        </ul>
+        <p>Columns are radial in the shells and follow the white-surface normals in the folded sheet. Along a normal, the area changes by 1 − 2Ht + Kt² (H, K: mean and Gaussian curvature at the white surface), so the exact equi-volume depth of a point at distance t is V(t)/V(3 mm) with V(t) = t − Ht² + Kt³/3; in the shells it is (r³ − r<sub>w</sub>³)/(r<sub>p</sub>³ − r<sub>w</sub>³) (spheres) or the squared version (cylinder).</p>
+        <p>Spheres are meshed as an icosphere (2562 vertices), the cylinder and sheet as regular grids with 0.3 mm spacing. vdfs' equi-distance depths agree with the exact ones to within 0.0026, which bounds the error from approximating the surfaces by triangles.</p>
+      </div>
+      <div class="prose">
+        <h3>Methods and checks</h3>
+        <ul>
+          <li><b>vdfs</b> (v1.1.0) with equi-distance depths, the current equi-volume formula, the Wagstyl formula, and the quadratic area model (copies of vdfs with only <code>alpha_from_beta</code> replaced). Vertex areas are calculated from the surfaces.</li>
+          <li><b>LayNii</b> <code>LN2_LAYERS -equivol</code> with 100 (default) and 1000 smoothing iterations, in a large voxel box in which the ribbon is not cut near the evaluated patches (see below).</li>
+          <li><b>Voxel grid:</b> 0.125 mm, so 24 voxels across the cortex, shifted by an irregular offset so that no voxel centre lies on a prism boundary.</li>
+          <li><b>Patches</b> are sets of whole columns: a 25° cone in the spheres, a 25° wedge in the cylinder, and columns starting within 1.5 mm of the crest, trough, flank and saddle in the folded sheet. All methods are evaluated on the same patches.</li>
+          <li><b>Voxel counting:</b> equi-volume depths put 10% of a patch's voxels into each tenth of the depth. With the exact depths the counts come out at 10.0 ± 0.5% (trough patch) or better, so the test resolves differences of about half a percentage point.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Layers in a folded sheet</h2>
+    <figure>
+      <img class="fig-light" src="{{IMG:fig_eggcrate_light}}" alt="Cross-section through the folded sheet: depth layers for the exact solution, both vdfs formulas and LayNii, and maps of their depth errors.">
+      <img class="fig-dark" src="{{IMG:fig_eggcrate_dark}}" alt="Cross-section through the folded sheet: depth layers for the exact solution, both vdfs formulas and LayNii, and maps of their depth errors.">
+      <figcaption><b>Cross-section through the folded sheet at y = 0</b>, from the crest (x = 0) over the flank to the trough (x = 10). Top: depth layers (light = white side, dark = pial side); dots mark the white and pial surfaces. Bottom: depth error against the exact equi-volume depth; note the different colour ranges (±0.05 for vdfs, ±0.15 for LayNii). The current formula places the inner half of the cortex too deep and the outer half too superficial at the crest, and the opposite in the trough (up to 0.05). The Wagstyl formula leaves a small error of one sign, mainly in the trough; the quadratic area model leaves none visible. LayNii leaves a large part of the equi-distance bias uncorrected at crest and trough; with default smoothing the correction is also patchy.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Concentric shells</h2>
+    <figure>
+      <img class="fig-light" src="{{IMG:fig_sphere_crown_light}}" alt="Sphere crown cross-section: layers and depth errors for the exact solution, both vdfs formulas and LayNii.">
+      <img class="fig-dark" src="{{IMG:fig_sphere_crown_dark}}" alt="Sphere crown cross-section: layers and depth errors for the exact solution, both vdfs formulas and LayNii.">
+      <figcaption><b>Sphere, gyral crown (pial/white area 3.06), slice y = 0.</b> Top: depth layers. Bottom: depth error against the exact equi-volume depth (±0.04 for vdfs, ±0.15 for LayNii). The current formula's error changes sign at mid-depth; the Wagstyl formula has a small error of one sign; the quadratic area model is exact up to the triangle approximation. LayNii's error with default smoothing varies with position on the voxel grid; with 1000 iterations it is mostly removed, apart from the voxels next to the surfaces.</figcaption>
+    </figure>
+    <figure>
+      <img class="fig-light" src="{{IMG:fig_sphere_fundus_light}}" alt="Sphere fundus cross-section: layers and depth errors for the exact solution, both vdfs formulas and LayNii.">
+      <img class="fig-dark" src="{{IMG:fig_sphere_fundus_dark}}" alt="Sphere fundus cross-section: layers and depth errors for the exact solution, both vdfs formulas and LayNii.">
+      <figcaption><b>Sphere, sulcal fundus (pial/white area 0.25), slice y = 0.</b> Here the pial surface is the inner sphere (bottom). The errors have the same shape with the opposite sign.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Depth errors</h2>
+    <div class="prose"><p>Mean error against the exact equi-volume depth, as a function of the exact depth, for each patch. LayNii is shown with 1000 smoothing iterations; its default-smoothing errors are larger and listed in the tables below each chart and in the summary table.</p></div>
+    <div class="charts" id="error-charts"></div>
+  </section>
+
+  <section>
+    <h2>Voxel counts per depth bin</h2>
+    <div class="prose"><p>Share of the voxels of each patch that fall into each tenth of the cortical depth. Equi-volume depths should give 10% in every bin.</p></div>
+    <div class="charts" id="bin-charts"></div>
+  </section>
+
+  <section>
+    <h2>How LayNii was run</h2>
+    <div class="grid2">
+      <div class="prose">
+        <h3>Rim</h3>
+        <p>LN2_LAYERS grows distances through the voxel grid from its border voxels and computes the depth as d<sub>inner</sub> / (d<sub>inner</sub> + d<sub>outer</sub>), measured between border-voxel centres. In its source code the border labels mark grey matter voxels (<code>rim == 2  // WM boundary voxels within GM</code>). The rim was therefore built as:</p>
+        <ul>
+          <li><b>3</b>: grey matter voxels (centre inside the ribbon),</li>
+          <li><b>2</b>: grey matter voxels with a face neighbour outside the grey matter, on the white side (equi-distance depth &lt; 0.5),</li>
+          <li><b>1</b>: the same on the pial side.</li>
+        </ul>
+        <p>The edge of the volume does not count as a border. Grey matter and sides come from one source only: the exact geometry in the large box, and the vdfs equi-distance depths (consistent with the mesh) in the vdfs boxes.</p>
+      </div>
+      <div class="prose">
+        <h3>Command and output</h3>
+<pre class="cmd">LN2_LAYERS -rim rim.nii -nr_layers 10 -equivol \
+    -incl_borders -iter_smooth 100 -output ln2_s100
+LN2_LAYERS -rim rim.nii -nr_layers 10 -equivol \
+    -incl_borders -iter_smooth 1000 -output ln2_s1000</pre>
+        <p><code>-incl_borders</code> gives every grey matter voxel a depth (border voxels get 0 or 1), so all methods are evaluated on the same voxels. The continuous <code>*_metric_equivol.nii</code> output is used, oriented so that 0 = white. LayNii's equi-distance depths agree with the exact ones to rms 0.014–0.015 (max 0.04–0.045, at the border voxels, which are set to exactly 0 and 1).</p>
+        <p><b>How LayNii computes equi-volume depths</b> (from <code>LN2_LAYERS.cpp</code>): every grey matter voxel is assigned its nearest inner and outer border voxel ("anchor"); voxels sharing an anchor form a column. For each column, LayNii counts the fraction w of its voxels in the inner equi-distance half, a voxel-counted estimate of the volume fraction at mid-depth, smooths w over the grey matter (<code>-iter_smooth</code>), and maps each voxel's equi-distance depth α to β = wα / (wα + (1 − w)(1 − α)). This curve is exact at both surfaces and at mid-depth and implies an area that varies as 1/((1 − w) + (2w − 1)α)². With an exact w, its largest depth errors would be 0.012 (sphere crown), 0.018 (sphere fundus) and 0.004 (cylinder), similar to the linear-area model; LayNii's larger errors in this test come from estimating w by counting about 24 voxels per column, from the smoothing needed to suppress that noise, which also blurs w across changes in curvature, and from columns cut by the volume boundary.</p>
+        <p><b>Large box:</b> complete sphere shells, a cylinder 16 mm long (patches end 6.5 mm before its cut ends), and a folded sheet 34 × 29 mm (columns of the patches about 10 mm from the box faces).</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>LayNii: sensitivity to rim, smoothing and box size</h2>
+    <div class="prose">
+      <h3>Rim construction and smoothing (closed shells)</h3>
+      <p>Three ways to build the rim from the surfaces: borders on the voxels just outside the grey matter ("outside", as in the first version of this report), on the outermost grey matter voxels ("inside", LayNii's convention, used for all other results), or on the voxels whose centre lies within half a voxel of the surface ("centred", which places the reference positions on the surface on average). Errors against the exact depth, evaluated on the voxels LayNii labels as grey matter:</p>
+    </div>
+    <div class="table-wrap" id="rim-table"></div>
+    <div class="prose">
+      <p>The rim construction shifts LayNii's reference surfaces by up to half a voxel and changes the equi-distance error by a factor of about 1.7; the smoothing matters more for equi-volume: 100 iterations, tuned for about 0.2 mm voxels, leave grid-dependent errors at 0.125 mm. With a centred rim and 1000 iterations, LayNii reaches rms 0.007–0.009 in the shells. These shells favour strong smoothing, because their equi-volume correction is the same everywhere; in the folded sheet, more smoothing helps less (summary table).</p>
+      <h3>Box size</h3>
+      <p>The same rim construction in the small voxel boxes used for vdfs, where the box faces cut the ribbon a few millimetres from the patches, against the large box:</p>
+    </div>
+    <div class="table-wrap" id="box-table"></div>
+    <figure>
+      <img class="fig-light" src="{{IMG:fig_laynii_box_light}}" alt="LayNii depth errors with 1000 smoothing iterations in the small vdfs box and in the large box, for the sphere crown and the folded sheet.">
+      <img class="fig-dark" src="{{IMG:fig_laynii_box_dark}}" alt="LayNii depth errors with 1000 smoothing iterations in the small vdfs box and in the large box, for the sphere crown and the folded sheet.">
+      <figcaption><b>LayNii depth error (1000 smoothing iterations) in the vdfs box and in the large box.</b> Top: sphere crown; bottom: folded sheet, both at y = 0. In the small sphere box, LayNii's equi-volume correction is largely missing (its error is close to that of equi-distance depths); in the complete shell it is mostly corrected. In the folded sheet, the larger box improves the crest but leaves much of the error at crest and trough, so there the box size is not the main limitation.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>vdfs: voxels exactly on prism boundaries</h2>
+    <figure>
+      <img class="fig-light" src="{{IMG:fig_holes_light}}" alt="Sphere crown slice from a voxel grid aligned with the mesh; red voxels inside the ribbon received no depth.">
+      <img class="fig-dark" src="{{IMG:fig_holes_dark}}" alt="Sphere crown slice from a voxel grid aligned with the mesh; red voxels inside the ribbon received no depth.">
+      <figcaption><b>Ribbon voxels without a depth (red), voxel grid aligned with the mesh.</b> The holes lie exactly where voxel centres coincide with prism boundaries (here the x = 0 and y = 0 planes, which contain mesh edges). Each prism sharing the boundary rejects the point because of rounding. With the shifted grid there are no holes. Real surfaces practically never align like this, but synthetic or grid-aligned meshes can. A small tolerance in the point-in-triangle test would fix it.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Conclusions</h2>
+    <div class="prose">
+      <ol>
+        <li>The current vdfs formula is not a different valid model but an inversion of the surface_tools formula. It gives systematically wrong equi-volume depths, with errors up to about 0.03–0.05 at strongly curved cortex.</li>
+        <li>The quadratic area model, using the midthickness area as a third area per vertex, gives exact equi-volume depths for the vdfs prism geometry at no extra input cost. The Wagstyl formula is its linear special case and roughly halves the current formula's errors; the quadratic model removes them. Since all equi-volume results would change, switching belongs in a new major version (vdfs 2.0). The quadratic model could also be the basis for calculating the intersection depth analytically instead of numerically.</li>
+        <li>For the vdfs boundary holes, add a small tolerance to the point-in-triangle test.</li>
+        <li>LayNii's equi-volume layering is less accurate in these tests and sensitive to the rim construction, the smoothing and cuts through the ribbon near the region of interest; vdfs is not affected by any of these. In the folded sheet LayNii corrects only part of the equi-distance bias even with strong smoothing.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <h2>Reproduction</h2>
+    <div class="prose">
+      <p>All scripts are in the <code>validation/</code> folder of the vdfs repository; <code>run_all.sh &lt;results dir&gt; &lt;LN2_LAYERS&gt;</code> runs everything and builds this page (see its README). vdfs ran with 10 parallel jobs; the four geometries took 13–150 s per variant.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+const DATA = {{DATA}};
+const GEOMS = DATA.results.geometries;
+const PATCHES = GEOMS.flatMap(g => g.patches.map(p => ({ ...p, geometry: g.name })));
+const SERIES = {
+  wagstyl: { label: "vdfs, Wagstyl formula", color: "var(--s-wagstyl)", key: "vdfs_wagstyl", short: "Wagstyl" },
+  current: { label: "vdfs, current formula", color: "var(--s-current)", key: "vdfs_current", short: "current" },
+  quadratic: { label: "vdfs, quadratic area model", color: "var(--s-quadratic)", key: "vdfs_quadratic", short: "quadratic" },
+  ln2_1000: { label: "LayNii, smoothing 1000", color: "var(--s-laynii)", key: "ln2_large_s1000", short: "LayNii 1000" },
+  ln2_100: { label: "LayNii, smoothing 100", color: "var(--s-laynii)", dash: true, key: "ln2_large_s100", short: "LayNii 100" },
+  equidist: { label: "vdfs equi-distance", color: "var(--s-ref)", dash: true, key: "vdfs_equidist", short: "equi-dist." },
+};
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (parent) parent.appendChild(e); return e; };
+const sgn = (v, d) => (v >= 0 ? "+" : "") + v.toFixed(d);
+
+function legend(keys) {
+  const div = document.createElement("div"); div.className = "legend";
+  for (const k of keys) { const s = document.createElement("span");
+    s.innerHTML = `<i class="${SERIES[k].dash ? "dash" : ""}" style="border-top-color:${SERIES[k].color}"></i>${SERIES[k].label}`;
+    div.appendChild(s); }
+  return div;
+}
+
+function lineChart(host, cfg) {
+  const W = 420, H = 250, m = { l: 48, r: 92, t: 10, b: 38 };
+  const wrap = document.createElement("div"); wrap.className = "chart";
+  const h4 = document.createElement("h4"); h4.textContent = cfg.title; wrap.appendChild(h4);
+  wrap.appendChild(legend(cfg.keys));
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": cfg.title });
+  wrap.appendChild(svg); host.appendChild(wrap);
+  const [x0, x1] = cfg.xDomain, [y0, y1] = cfg.yDomain;
+  const X = v => m.l + (v - x0) / (x1 - x0) * (W - m.l - m.r);
+  const Y = v => H - m.b - (Math.max(y0, Math.min(y1, v)) - y0) / (y1 - y0) * (H - m.t - m.b);
+  for (const t of cfg.yTicks) {
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    el("text", { x: m.l - 6, y: Y(t) + 4, "text-anchor": "end", "font-size": 11, fill: "var(--muted)" }, svg).textContent = cfg.fmtY(t);
+  }
+  for (const t of cfg.xTicks)
+    el("text", { x: X(t), y: H - m.b + 16, "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" }, svg).textContent = String(t);
+  el("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1 }, svg);
+  el("text", { x: (m.l + W - m.r) / 2, y: H - 4, "text-anchor": "middle", "font-size": 11, fill: "var(--fg-2)" }, svg).textContent = cfg.xLabel;
+  el("text", { x: 12, y: (m.t + H - m.b) / 2, "text-anchor": "middle", "font-size": 11, fill: "var(--fg-2)",
+    transform: `rotate(-90 12 ${(m.t + H - m.b) / 2})` }, svg).textContent = cfg.yLabel;
+  if (cfg.ref !== undefined)
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(cfg.ref), y2: Y(cfg.ref), stroke: "var(--fg-2)", "stroke-width": 1, "stroke-dasharray": "2 3" }, svg);
+  const order = [...cfg.keys].sort((a, b) => (SERIES[b].dash ? 1 : 0) - (SERIES[a].dash ? 1 : 0));
+  const ends = [];
+  for (const k of order) {
+    const vals = cfg.series[k]; if (!vals) continue;
+    let d = "", pen = false, last = null;
+    vals.forEach((v, i) => { if (v === null) { pen = false; return; }
+      d += `${pen ? "L" : "M"}${X(cfg.x[i]).toFixed(1)},${Y(v).toFixed(1)}`; pen = true; last = v; });
+    el("path", { d, fill: "none", stroke: SERIES[k].color, "stroke-width": 2, "stroke-linejoin": "round",
+      "stroke-dasharray": SERIES[k].dash ? "5 4" : "none" }, svg);
+    if (cfg.markers) vals.forEach((v, i) => { if (v !== null)
+      el("circle", { cx: X(cfg.x[i]), cy: Y(v), r: 4, fill: SERIES[k].color, stroke: "var(--bg)", "stroke-width": 2 }, svg); });
+    if (last !== null) ends.push({ k, y: Y(last) });
+  }
+  ends.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 13) ends[i].y = ends[i - 1].y + 13;
+  for (const e of ends)
+    el("text", { x: W - m.r + 8, y: e.y + 4, "font-size": 11, fill: "var(--fg-2)" }, svg).textContent = SERIES[e.k].short;
+  const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; wrap.appendChild(tip);
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect(); const px = (ev.clientX - r.left) / r.width * W;
+    let best = 0; cfg.x.forEach((v, i) => { if (Math.abs(X(v) - px) < Math.abs(X(cfg.x[best]) - px)) best = i; });
+    cross.setAttribute("x1", X(cfg.x[best])); cross.setAttribute("x2", X(cfg.x[best])); cross.setAttribute("visibility", "visible");
+    tip.innerHTML = `<b>${cfg.tipX(cfg.x[best])}</b><br>` + cfg.keys.filter(k => cfg.series[k] && cfg.series[k][best] !== null).map(k =>
+      `<span style="color:${SERIES[k].color}">●</span> ${SERIES[k].label}: ${cfg.fmtTip(cfg.series[k][best])}`).join("<br>");
+    tip.hidden = false;
+    const wr = wrap.getBoundingClientRect(); let left = ev.clientX - wr.left + 14;
+    if (left + tip.offsetWidth > wr.width) left = ev.clientX - wr.left - tip.offsetWidth - 14;
+    tip.style.left = Math.max(0, left) + "px"; tip.style.top = (ev.clientY - wr.top + 12) + "px";
+  });
+  hit.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
+  return wrap;
+}
+
+function table(cols, rows) {
+  const wrap = document.createElement("div"); wrap.className = "table-wrap";
+  wrap.innerHTML = `<table><thead><tr>${cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map(r => `<tr>${r.map(c => typeof c === "object" ? `<td class="${c.cls || ""}">${c.v}</td>` : `<td>${c}</td>`).join("")}</tr>`).join("") +
+    `</tbody></table>`;
+  return wrap;
+}
+function details(label, node) {
+  const d = document.createElement("details"); const s = document.createElement("summary"); s.textContent = label;
+  d.appendChild(s); d.appendChild(node); return d;
+}
+const note = (host, text) => { const p = document.createElement("p"); p.className = "meta"; p.style.marginTop = "6px"; p.textContent = text; host.appendChild(p); };
+
+// summary table
+{
+  const keys = ["equidist", "current", "wagstyl", "quadratic", "ln2_100", "ln2_1000"];
+  const rows = PATCHES.map(p => {
+    const m = keys.map(k => p.methods[SERIES[k].key]);
+    const bestDev = Math.min(...m.slice(1).map(s => s.max_dev)), bestRms = Math.min(...m.slice(1).map(s => s.err_rms));
+    return [p.label, ...m.map((s, i) => ({ v: s.max_dev.toFixed(1), cls: i && s.max_dev === bestDev ? "best" : "" })),
+      ...m.map((s, i) => ({ v: s.err_rms.toFixed(4), cls: i && s.err_rms === bestRms ? "best" : "" }))];
+  });
+  const host = document.getElementById("summary-table");
+  host.appendChild(table(["Patch", ...keys.map(k => `Bin dev.<br>${SERIES[k].short}`), ...keys.map(k => `rms error<br>${SERIES[k].short}`)], rows));
+  note(host, "Bin dev.: largest deviation from 10% in any depth bin (percentage points). rms error: against the exact equi-volume depth. Bold: best among the equi-volume methods. LayNii: large box.");
+}
+
+// formula charts
+{
+  const host = document.getElementById("formula-charts");
+  for (const f of DATA.formula) {
+    const series = {}; for (const k of ["current", "wagstyl"]) series[k] = f.series[k].map((v, i) => v - f.x[i]);
+    const lim = Math.ceil(Math.max(...[...series.current, ...series.wagstyl].map(Math.abs)) * 20) / 20;
+    lineChart(host, { title: `Shift of the intermediate surface, ${f.label}`, x: f.x, series, keys: ["wagstyl", "current"],
+      xDomain: [0, 1], yDomain: [-lim, lim], yTicks: [-lim, -lim / 2, 0, lim / 2, lim], xTicks: [0, 0.25, 0.5, 0.75, 1],
+      xLabel: "equi-volume depth β", yLabel: "α − β", ref: 0, fmtY: v => v.toFixed(3),
+      tipX: v => `β = ${v.toFixed(3)}`, fmtTip: v => sgn(v, 4) });
+  }
+}
+
+// error charts
+{
+  const host = document.getElementById("error-charts");
+  const keys = ["quadratic", "wagstyl", "current", "ln2_1000"];
+  const x = [...Array(20).keys()].map(i => 0.025 + i * 0.05);
+  const all = PATCHES.flatMap(p => keys.flatMap(k => p.methods[SERIES[k].key].profile)).filter(v => v !== null);
+  const lim = Math.ceil(Math.max(...all.map(Math.abs)) * 50) / 50;
+  for (const p of PATCHES) {
+    const series = Object.fromEntries(keys.map(k => [k, p.methods[SERIES[k].key].profile]));
+    const c = lineChart(host, { title: p.label, x, series, keys, xDomain: [0, 1], yDomain: [-lim, lim],
+      yTicks: [-lim, -lim / 2, 0, lim / 2, lim], xTicks: [0, 0.25, 0.5, 0.75, 1], xLabel: "exact equi-volume depth",
+      yLabel: "mean depth error", ref: 0, fmtY: v => v.toFixed(3), markers: true,
+      tipX: v => `exact depth ${(v - 0.025).toFixed(2)}–${(v + 0.025).toFixed(2)}`, fmtTip: v => sgn(v, 4) });
+    const tk = ["equidist", "current", "wagstyl", "quadratic", "ln2_100", "ln2_1000"];
+    c.appendChild(details("Show table", table(["", ...tk.map(k => SERIES[k].short)],
+      [["mean error", ...tk.map(k => sgn(p.methods[SERIES[k].key].err_mean, 4))],
+       ["rms error", ...tk.map(k => p.methods[SERIES[k].key].err_rms.toFixed(4))],
+       ["max |error|", ...tk.map(k => p.methods[SERIES[k].key].err_max.toFixed(4))],
+       ...x.map((xv, i) => [`depth ${(xv - 0.025).toFixed(2)}–${(xv + 0.025).toFixed(2)}`,
+         ...tk.map(k => { const v = p.methods[SERIES[k].key].profile[i]; return v === null ? "–" : sgn(v, 4); })])])));
+  }
+}
+
+// bin charts
+{
+  const host = document.getElementById("bin-charts");
+  const x = [...Array(10).keys()].map(i => i + 1);
+  const keys = ["equidist", "current", "wagstyl", "quadratic", "ln2_100", "ln2_1000"];
+  for (const p of PATCHES) {
+    const series = Object.fromEntries(keys.map(k => [k, p.methods[SERIES[k].key].bins]));
+    const c = lineChart(host, { title: p.label, x, series, keys, xDomain: [1, 10], yDomain: [4, 18],
+      yTicks: [4, 6, 8, 10, 12, 14, 16, 18], xTicks: x, xLabel: "depth bin (1 = white side, 10 = pial side)",
+      yLabel: "voxels in bin (%)", ref: 10, fmtY: v => v + "%", markers: true,
+      tipX: v => `depth ${((v - 1) / 10).toFixed(1)}–${(v / 10).toFixed(1)}`, fmtTip: v => v.toFixed(1) + "%" });
+    c.appendChild(details("Show table", table(["Depth bin", "exact", ...keys.map(k => SERIES[k].short)],
+      x.map((v, i) => [`${((v - 1) / 10).toFixed(1)}–${(v / 10).toFixed(1)}`, p.methods.exact.bins[i].toFixed(1) + "%",
+        ...keys.map(k => series[k][i].toFixed(1) + "%")]))));
+  }
+}
+
+// rim sensitivity table
+{
+  const label = { sphere_crown: "Sphere, gyral crown", sphere_fundus: "Sphere, sulcal fundus", cylinder_crown: "Cylinder, crown" };
+  const rows = DATA.rim_variants.map(r => [label[r.geometry] || r.geometry, r.rim, r.options === "defaults" ? "100 (default)" : r.options.replace("-iter_smooth ", ""),
+    r.equidist_max.toFixed(4), sgn(r.mean, 4), r.rms.toFixed(4), r.max.toFixed(4)]);
+  const host = document.getElementById("rim-table");
+  host.appendChild(table(["Geometry", "Rim", "Smoothing", "Equi-dist.<br>max |error|", "Equi-vol.<br>mean error", "Equi-vol.<br>rms error", "Equi-vol.<br>max |error|"], rows));
+}
+
+// box size table
+{
+  const rows = PATCHES.map(p => {
+    const m = k => p.methods[k];
+    return [p.label, ...["ln2_vdfs_s100", "ln2_large_s100", "ln2_vdfs_s1000", "ln2_large_s1000"].map(k => `${sgn(m(k).err_mean, 3)} / ${m(k).err_rms.toFixed(3)}`)];
+  });
+  const host = document.getElementById("box-table");
+  host.appendChild(table(["Patch", "vdfs box<br>smoothing 100", "large box<br>smoothing 100", "vdfs box<br>smoothing 1000", "large box<br>smoothing 1000"], rows));
+  note(host, "LayNii equi-volume error against the exact depth: mean / rms.");
+}
+</script>

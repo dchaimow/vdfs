@@ -47,9 +47,14 @@ def load_fs_surf_in_grid(surf_file, grid_to_scanner, label_file=None):
     """
     Loads a freesurfer or gifti surface and transforms coordinates from freesurfer space to grid space,
     by using the grid_to_scanner transformation (e.g. affine function a functional nifti image).
+    If a label file is provided, only triangles with all vertices inside the label are kept. Besides
+    vertices and triangles, the returned surface contains the original index of each triangle
+    ("tris_idx") and the original number of triangles ("nTrisOrig").
     """
     # load freesurfer or gifti surface
     coords, faces, fs_to_scanner = read_surf_geometry(surf_file)
+    n_tris_orig = faces.shape[0]
+    tris_idx = np.arange(n_tris_orig)
 
     # if label file provided
     if label_file is not None:
@@ -59,27 +64,35 @@ def load_fs_surf_in_grid(surf_file, grid_to_scanner, label_file=None):
         # remove all triangles that contain vertices that are not in the label
         face_mask = np.all(vertex_mask[faces],axis=1)
         faces = faces[face_mask]
+        tris_idx = tris_idx[face_mask]
 
     surf = dict()
     surf["nVertices"] = coords.shape[0]
     surf["nTris"] = faces.shape[0]
+    surf["nTrisOrig"] = n_tris_orig
     grid_to_scanner = np.matrix(grid_to_scanner)
     fs_to_voxel = grid_to_scanner.I @ fs_to_scanner
     surf["vertices"] = np.array(fs_to_voxel.dot(
         np.hstack((coords, np.ones((surf["nVertices"], 1)))).T).T[:, :3])
     surf["tris"] = np.array(faces, dtype=np.int64)
+    surf["tris_idx"] = tris_idx
     return surf
 
 
 def merge_surfaces(surf1, surf2):
     """
-    Merges separate representations of two surfaces into one.
+    Merges separate representations of two surfaces into one. Original triangle indices of the second
+    surface are offset by the original number of triangles of the first surface.
     """
     surf = dict()
     surf["nTris"] = surf1["nTris"] + surf2["nTris"]
     surf["nVertices"] = surf1["nVertices"] + surf2["nVertices"]
     surf["vertices"] = np.array(np.concatenate((surf1["vertices"], surf2["vertices"])))
     surf["tris"] = np.concatenate((surf1["tris"], surf2["tris"] + surf1["nVertices"]))
+    n_tris_orig_1 = surf1.get("nTrisOrig", surf1["nTris"])
+    surf["nTrisOrig"] = n_tris_orig_1 + surf2.get("nTrisOrig", surf2["nTris"])
+    surf["tris_idx"] = np.concatenate((surf1.get("tris_idx", np.arange(surf1["nTris"])),
+                                       surf2.get("tris_idx", np.arange(surf2["nTris"])) + n_tris_orig_1))
     return surf
 
 
@@ -335,6 +348,9 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
     Calculate voxel grid depths from surfaces given all surface information (assumed to be in voxel grid space).
     White and pial surface need to have the same vertices and triangles (i.e. correspond to each other),
     vertex areas need to be provided for all surface vertices.
+    Returns depths and columns, the index of the triangle (prism) that contains each voxel center. If the
+    surfaces contain the original triangle indices ("tris_idx", e.g. when restricted to a label),
+    these are used for the columns.
     """
     if surf_white["nVertices"] != surf_pial["nVertices"] or not np.array_equal(
             surf_white["tris"], surf_pial["tris"]):
@@ -379,6 +395,11 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
     # take results from parallel calculation and assign them to the correct voxel in the grid
     depths, columns = numba_assign_calc_depth_results(
         results, roi, bounding_prisms.shape[:3])
+
+    # translate prism indices into original triangle indices
+    if "tris_idx" in surf_pial:
+        in_prism = ~np.isnan(columns)
+        columns[in_prism] = surf_pial["tris_idx"][columns[in_prism].astype(np.int64)]
 
     return depths, columns
 

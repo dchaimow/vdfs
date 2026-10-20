@@ -7,9 +7,34 @@ from joblib import Parallel, delayed, parallel_backend
 import os
 
 
+def is_gifti(fname):
+    """Tests if a file is a gifti file (based on its extension)."""
+    return str(fname).endswith(".gii")
+
+
+def read_surf_geometry(surf_file):
+    """
+    Reads vertex coordinates and faces of a freesurfer or gifti surface.
+    Returns coords, faces and the freesurfer to scanner transformation. For freesurfer surfaces this
+    is a translation by the c_ras stored in the surface file, gifti surface coordinates are assumed
+    to already be in scanner space (identity transformation).
+    """
+    fs_to_scanner = np.eye(4)
+    if is_gifti(surf_file):
+        surf_gii = nib.load(surf_file)
+        coords = surf_gii.agg_data("NIFTI_INTENT_POINTSET")
+        faces = surf_gii.agg_data("NIFTI_INTENT_TRIANGLE")
+    else:
+        coords, faces, volume_info = nib.freesurfer.read_geometry(
+            surf_file, read_metadata=True
+        )
+        fs_to_scanner[:3, 3] = volume_info["cras"]
+    return coords, faces, fs_to_scanner
+
+
 def load_fs_surf_in_scanner_space(surf_file):
     """
-    Loads a freesurfer surface in scanner space (only doing freesurfer to scanner transformation).
+    Loads a freesurfer or gifti surface in scanner space (only doing freesurfer to scanner transformation).
     """
     surf = load_fs_surf_in_grid(surf_file, np.eye(4))
     return surf
@@ -17,13 +42,11 @@ def load_fs_surf_in_scanner_space(surf_file):
 
 def load_fs_surf_in_grid(surf_file, grid_to_scanner, label_file=None):
     """
-    Loads a freesurfer surface and transforms coordinates from freesurfer space to grid space,
+    Loads a freesurfer or gifti surface and transforms coordinates from freesurfer space to grid space,
     by using the grid_to_scanner transformation (e.g. affine function a functional nifti image).
     """
-    # load freesurfer surface
-    coords, faces, volume_info = nib.freesurfer.read_geometry(
-        surf_file, read_metadata=True
-    )
+    # load freesurfer or gifti surface
+    coords, faces, fs_to_scanner = read_surf_geometry(surf_file)
 
     # if label file provided
     if label_file is not None:
@@ -37,8 +60,6 @@ def load_fs_surf_in_grid(surf_file, grid_to_scanner, label_file=None):
     surf = dict()
     surf["nVertices"] = coords.shape[0]
     surf["nTris"] = faces.shape[0]
-    fs_to_scanner = np.eye(4)
-    fs_to_scanner[:3, 3] = volume_info["cras"]
     grid_to_scanner = np.matrix(grid_to_scanner)
     fs_to_voxel = grid_to_scanner.I @ fs_to_scanner
     surf["vertices"] = np.array(fs_to_voxel.dot(

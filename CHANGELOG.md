@@ -24,6 +24,10 @@ Changes of results compared to 1.0.0 (for the same inputs, using area files):
 - Columns, if labels are used (fix above).
 - The equivolume formula is unchanged.
 
+Updating a project from 1.0.0:
+- Existing calls of `process_voxeldepth_from_surfaces()` with area files keep working.
+- 1.0.0 cannot be installed with pip (no `pyproject.toml`), only used as a git submodule. To switch a project from a `vdfs` submodule to a pip-installed vdfs, remove the submodule (`git rm vdfs`) and install vdfs (>= 1.1.0) in the project's environment. Scripts that `import vdfs` work unchanged.
+
 ## 1.0.0
 
-State of the code before consolidation (FreeSurfer surfaces only, area files required), tagged for reproducibility of earlier results.
+State of the code before consolidation (FreeSurfer surfaces only, area files required), tagged for reproducibility of earlier results. Not pip-installable, only usable as a git submodule.

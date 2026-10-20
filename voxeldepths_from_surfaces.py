@@ -138,14 +138,27 @@ def merge_surfaces(surf1, surf2):
 
 @jit(nopython=True)
 def alpha_from_beta(beta, aw, ap):
-    """Calculates the relative equi-distance depth alpha from relative equi-volume depth
-    beta, using the local area of the bottom (white) and top (pial) vertex.
+    """Calculates the relative equi-distance depth alpha (distance fraction from the white surface) at which
+    the volume fraction below the intermediate surface equals the equi-volume depth beta, using the local area
+    of the bottom (white, aw) and top (pial, ap) vertex.
+
+    The area is assumed to change linearly with distance, A(alpha) = aw + (ap - aw) alpha (Waehnert et al., 2014,
+    NeuroImage 93, Eq. 10; surface_tools by K. Wagstyl). Then the volume fraction below alpha is
+    (2 aw alpha + (ap - aw) alpha^2) / (aw + ap), and solving it for alpha gives
+    alpha = (-aw + sqrt((1 - beta) aw^2 + beta ap^2)) / (ap - aw). The equivalent form used here,
+    alpha = beta (aw + ap) / (aw + sqrt((1 - beta) aw^2 + beta ap^2)), is also stable for aw close to ap.
     If both areas are zero, alpha equals beta (equi-distance).
+
+    vdfs <= 1.1 used alpha = (2 ap beta - ap beta^2 + aw beta^2) / (ap + aw). That is the inverse of the
+    surface_tools function (it maps a distance fraction to a volume fraction, measured from the pial surface)
+    and agrees with the correct relation only to first order in the area difference.
     """
     if ap + aw == 0:
         return beta
-    alpha = (2 * ap * beta - ap * beta**2 + aw * beta**2) / (ap + aw)
-    return alpha
+    denominator = aw + np.sqrt((1 - beta) * aw**2 + beta * ap**2)
+    if denominator == 0:  # aw = 0 and beta = 0
+        return 0.0
+    return beta * (aw + ap) / denominator
 
 
 @jit(nopython=True)

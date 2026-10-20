@@ -2,6 +2,9 @@
 
 ## Unreleased (2.0.0)
 
+Changes of results:
+- **Equi-volume depths: corrected formula.** `alpha_from_beta` now uses the linear-area model of Waehnert et al. (2014, Eq. 10), as in surface_tools by K. Wagstyl. The formula used since the first version, alpha = (2 ap beta - ap beta^2 + aw beta^2) / (ap + aw), was the inverse of the surface_tools function (distance fraction to volume fraction, measured from the pial surface). It agrees with the correct relation only to first order in the white/pial area difference and gave too many voxels at mid-depth and too few near the surfaces; in synthetic tests (`validation/`) its depth errors were about twice as large (rms up to 0.027, max up to 0.050 at strongly curved cortex).
+
 Fixes:
 - Points lying exactly on a boundary between prisms (e.g. voxel centres on a mesh symmetry plane) could get no depth, because rounding placed them marginally outside every adjacent intermediate triangle. Points within a tiny tolerance of a triangle edge (`EDGE_TOLERANCE`, 1e-6 of the edge length) now count as inside (#10).
 

@@ -207,3 +207,11 @@ def test_point_on_boundary_between_prisms():
     d, c = vdfs.calc_depth_from_surfaces_voxelidx((0, 0, 0), faces, white, pial, np.ones(4), np.ones(4),
                                                   bounding_prisms, p=p, method="equidist")
     assert d == pytest.approx(0.6679147, abs=1e-6)
+
+
+def test_alpha_from_beta_preserves_volume():
+    # with the area changing linearly with distance, the volume fraction below alpha must equal beta
+    for aw, ap in ((1.0, 4.0), (4.0, 1.0), (1.0, 1.0), (2.0, 2.0 + 1e-9), (0.0, 1.0), (1.0, 0.0)):
+        for beta in np.linspace(0, 1, 11):
+            alpha = vdfs.alpha_from_beta(beta, aw, ap)
+            assert (2 * aw * alpha + (ap - aw) * alpha ** 2) / (aw + ap) == pytest.approx(beta, abs=1e-12)

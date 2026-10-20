@@ -75,6 +75,21 @@ def load_vertex_area(area_file=None, surf_file=None):
     return calc_vertex_area(coords, faces)
 
 
+def calc_mid_vertex_area(surf_white_file, surf_pial_file):
+    """
+    Calculates the vertex areas of the midthickness surface, whose vertices lie halfway between corresponding
+    white and pial vertices (the intermediate surface at equi-distance depth 0.5). Used by the quadratic area
+    model (see alpha_from_beta_quadratic). Note that freesurfer's ?h.area.mid is not this area, but the mean of
+    ?h.area and ?h.area.pial.
+    """
+    coords_white, faces, _ = read_surf_geometry(surf_white_file)
+    coords_pial, faces_pial, _ = read_surf_geometry(surf_pial_file)
+    if coords_white.shape != coords_pial.shape or not np.array_equal(faces, faces_pial):
+        raise ValueError("white and pial surfaces need to have the same vertices and triangles")
+    coords_white = np.asarray(coords_white, dtype=np.float64)
+    return calc_vertex_area((coords_white + coords_pial) / 2, faces)
+
+
 def load_fs_surf_in_scanner_space(surf_file):
     """
     Loads a freesurfer or gifti surface in scanner space (only doing freesurfer to scanner transformation).
@@ -162,6 +177,53 @@ def alpha_from_beta(beta, aw, ap):
 
 
 @jit(nopython=True)
+def alpha_from_beta_quadratic(beta, aw, ap, am):
+    """Calculates the relative equi-distance depth alpha (distance fraction from the white surface) at which
+    the volume fraction below the intermediate surface equals the equi-volume depth beta, assuming that the
+    area changes quadratically with distance:
+
+        A(alpha) = aw (1 - alpha)^2 + 2 am alpha (1 - alpha) + ap alpha^2
+
+    aw, ap: vertex areas on the white and pial surface; am: middle coefficient, am = 2 a_mid - (aw + ap) / 2,
+    where a_mid is the vertex area on the midthickness surface (the intermediate surface at alpha = 0.5).
+
+    Why quadratic: vdfs moves every vertex along the straight line from its white to its pial position, so the
+    edges of an intermediate triangle are linear in alpha and its (vector) area, the cross product of two edges,
+    is quadratic in alpha. The scalar area is exactly quadratic when the white and pial triangles are parallel
+    and very nearly so otherwise; vertex areas (sums of triangle areas) inherit this. Three areas determine the
+    quadratic, and the midthickness area provides the third. For parallel surfaces the area along a normal
+    changes as A(t) = A(0) (1 - 2 H t + K t^2) (mean and Gaussian curvature H, K), so the quadratic term
+    matters wherever the cortex is curved in two directions; the linear-area model (alpha_from_beta) is the
+    special case a_mid = (aw + ap) / 2, which is exact only for zero Gaussian curvature (e.g. a cylinder).
+
+    The volume fraction below alpha, V(alpha) / V(1) with V(alpha) = c1 alpha + c2 alpha^2 + c3 alpha^3
+    (c1 = aw, c2 = am - aw, c3 = (aw - 2 am + ap) / 3), is solved for alpha with Newton's method, starting from
+    the linear-area solution. If the quadratic area is not positive throughout (degenerate geometry), the
+    linear-area solution is returned.
+    """
+    c3 = (aw - 2 * am + ap) / 3
+    linear = alpha_from_beta(beta, aw, ap)
+    if abs(c3) <= 1e-12 * (abs(aw) + abs(ap)):  # linear-area model (up to rounding)
+        return linear
+    c1, c2 = aw, am - aw
+    total = c1 + c2 + c3
+    if total <= 0:
+        return linear
+    target = beta * total
+    alpha = linear
+    for _ in range(50):
+        dv = (3 * c3 * alpha + 2 * c2) * alpha + c1
+        if dv <= 0:
+            return linear
+        step = (((c3 * alpha + c2) * alpha + c1) * alpha - target) / dv
+        new_alpha = min(1.0, max(0.0, alpha - step))
+        if abs(new_alpha - alpha) < 1e-14:
+            return new_alpha
+        alpha = new_alpha
+    return alpha
+
+
+@jit(nopython=True)
 def intermediate_plane(a1, b1, c1, a2, b2, c2, alpha_a, alpha_b, alpha_c):
     """Calculates vertices of intermediate plane triangled defined by relative depths 
     for all three vertices independently"""
@@ -179,13 +241,14 @@ def equidist_plane(a1, b1, c1, a2, b2, c2, alpha):
 
 
 @jit(nopython=True)
-def equivol_plane(a1, b1, c1, a2, b2, c2, beta, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c):
-    """The vertices of equi-volume intermediate plane triangles are calculated by using relative 
-    depths for each vertex that are proportional to the local area of the bottom (white) and top (pial)
-    vertices."""
-    alpha_a = alpha_from_beta(beta, aw_a, ap_a)
-    alpha_b = alpha_from_beta(beta, aw_b, ap_b)
-    alpha_c = alpha_from_beta(beta, aw_c, ap_c)
+def equivol_plane(a1, b1, c1, a2, b2, c2, beta, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c):
+    """The vertices of equi-volume intermediate plane triangles are calculated by using relative
+    depths for each vertex that depend on the local area of the bottom (white, aw) and top (pial, ap)
+    vertices and the middle coefficient am of the quadratic area model (see alpha_from_beta_quadratic;
+    am = (aw + ap) / 2 gives the linear-area model)."""
+    alpha_a = alpha_from_beta_quadratic(beta, aw_a, ap_a, am_a)
+    alpha_b = alpha_from_beta_quadratic(beta, aw_b, ap_b, am_b)
+    alpha_c = alpha_from_beta_quadratic(beta, aw_c, ap_c, am_c)
     return intermediate_plane(a1, b1, c1, a2, b2, c2, alpha_a, alpha_b, alpha_c)
 
 
@@ -329,8 +392,8 @@ def numba_calc_bounding_prisms(faces, vertices_white, vertices_pial, n_x, n_y, n
 
 
 def calc_depth_from_surfaces_voxelidx(voxelidx, 
-                                      faces, vertices_white, vertices_pial, area_white, area_pial, 
-                                      bounding_prisms, p=None, method='equivol'):
+                                      faces, vertices_white, vertices_pial, area_white, area_pial,
+                                      bounding_prisms, p=None, method='equivol', area_mid=None):
     """
     This is the main function that calculates the depth of a voxel with coordinates given by p.
     It numerically solves an intersection equation for the voxel center with a parametrization
@@ -342,7 +405,9 @@ def calc_depth_from_surfaces_voxelidx(voxelidx,
     In that case we use that grid and its resolution to determine the bounding prisms. If p is not None
     bounding_prisms should have been calculated for a grid of arbitrary resolution that contains the point p and 
     the voxelidx is the artifical voxel within wich p is contained.
-    As soon as a solution is found that is inside the prism, the depth is returned.    
+    As soon as a solution is found that is inside the prism, the depth is returned.
+    For method="equivol", area_mid (vertex areas of the midthickness surface) selects the quadratic area model;
+    without it, the linear-area model is used (see alpha_from_beta_quadratic).
     """
     if method not in ("equivol", "equidist"):
         raise ValueError(f"method must be 'equivol' or 'equidist', not {method!r}")
@@ -371,10 +436,18 @@ def calc_depth_from_surfaces_voxelidx(voxelidx,
             ap_a = area_pial[faces[canditate_prism_idx, 0]]
             ap_b = area_pial[faces[canditate_prism_idx, 1]]
             ap_c = area_pial[faces[canditate_prism_idx, 2]]
+            # middle coefficient of the quadratic area model (linear-area model without midthickness areas)
+            if area_mid is None:
+                am_a, am_b, am_c = (aw_a + ap_a) / 2, (aw_b + ap_b) / 2, (aw_c + ap_c) / 2
+            else:
+                am_a = 2 * area_mid[faces[canditate_prism_idx, 0]] - (aw_a + ap_a) / 2
+                am_b = 2 * area_mid[faces[canditate_prism_idx, 1]] - (aw_b + ap_b) / 2
+                am_c = 2 * area_mid[faces[canditate_prism_idx, 2]] - (aw_c + ap_c) / 2
 
-            depth_plane_function = lambda beta: equivol_plane(a1, b1, c1, a2, b2, c2, beta, 
-                                                              aw_a, aw_b, aw_c, 
-                                                              ap_a, ap_b, ap_c)
+            depth_plane_function = lambda beta: equivol_plane(a1, b1, c1, a2, b2, c2, beta,
+                                                              aw_a, aw_b, aw_c,
+                                                              ap_a, ap_b, ap_c,
+                                                              am_a, am_b, am_c)
         elif method == "equidist":
             depth_plane_function = lambda alpha: equidist_plane(a1, b1, c1, a2, b2, c2, alpha)
         # find depth through voxel center 
@@ -404,11 +477,13 @@ def numba_assign_calc_depth_results(results, roi, grid_size):
 
 
 def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pial,
-                                     n_x, n_y, n_z, method, n_jobs=32):
+                                     n_x, n_y, n_z, method, n_jobs=32, area_mid=None):
     """
     Calculate voxel grid depths from surfaces given all surface information (assumed to be in voxel grid space).
     White and pial surface need to have the same vertices and triangles (i.e. correspond to each other),
-    vertex areas need to be provided for all surface vertices.
+    vertex areas need to be provided for all surface vertices. For method="equivol", area_mid (vertex areas of
+    the midthickness surface, see calc_mid_vertex_area) selects the quadratic area model; without it, the
+    linear-area model is used.
     Returns depths and columns, the index of the triangle (prism) that contains each voxel center. If the
     surfaces contain the original triangle indices ("tris_idx", e.g. when restricted to a label),
     these are used for the columns.
@@ -418,6 +493,8 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
         raise ValueError("white and pial surfaces need to have the same vertices and triangles")
     if len(area_white) != surf_white["nVertices"] or len(area_pial) != surf_pial["nVertices"]:
         raise ValueError("number of vertex areas does not match number of surface vertices")
+    if area_mid is not None and len(area_mid) != surf_white["nVertices"]:
+        raise ValueError("number of midthickness vertex areas does not match number of surface vertices")
 
     faces = surf_pial["tris"]
     vertices_white = surf_white["vertices"]
@@ -450,7 +527,8 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
                         area_pial,
                         bounding_prisms,
                         None,
-                        method)
+                        method,
+                        area_mid)
                 )(roi_idx) for roi_idx in roi))
 
     # take results from parallel calculation and assign them to the correct voxel in the grid
@@ -477,6 +555,7 @@ def voxeldepths_from_surfaces(
     label_lh_fname=None,
     label_rh_fname=None,
     method="equivol",
+    area_model="quadratic",
     upsample_factor=None,
     n_jobs=32,
     force=False):
@@ -500,6 +579,12 @@ def voxeldepths_from_surfaces(
         that restrict the calculation to triangles inside the label. If a label is provided for only one
         hemisphere, the other hemisphere is ignored.
     method: "equivol" (equi-volume) or "equidist" (equi-distance) depths
+    area_model: how the area of a column changes between white and pial surface for equi-volume depths:
+        "quadratic" (default): quadratic in the distance fraction, determined by the vertex areas of the white,
+            midthickness and pial surfaces. This is exact for the geometry vdfs uses (vertices moving on straight
+            lines from white to pial), see alpha_from_beta_quadratic.
+        "linear": linear in the distance fraction (Waehnert et al., 2014; surface_tools), exact only where the
+            cortex is curved in at most one direction.
     upsample_factor: optional upsampling of the voxel grid
     n_jobs: number of parallel jobs
     force: if False and both output files exist, they are loaded instead of recalculated
@@ -510,7 +595,7 @@ def voxeldepths_from_surfaces(
         surf_white_lh_file, None, surf_pial_lh_file, None,
         surf_white_rh_file, None, surf_pial_rh_file, None,
         volume_file, depths_fname, columns_fname,
-        label_lh_fname=label_lh_fname, label_rh_fname=label_rh_fname, method=method,
+        label_lh_fname=label_lh_fname, label_rh_fname=label_rh_fname, method=method, area_model=area_model,
         upsample_factor=upsample_factor, n_jobs=n_jobs, force=force)
 
 
@@ -531,7 +616,8 @@ def process_voxeldepth_from_surfaces(
     method="equivol",
     upsample_factor=None,
     n_jobs=32,
-    force=False):
+    force=False,
+    area_model="quadratic"):
     """
     Calculate voxel depths from surfaces and vertex area files and save them to nifti files.
 
@@ -540,7 +626,11 @@ def process_voxeldepth_from_surfaces(
     Area files can be freesurfer (e.g. lh.area, lh.area.pial) or gifti metric files. If an area file is
     None, the vertex areas are calculated from the corresponding surface (identical to the freesurfer
     area files). New code should use voxeldepths_from_surfaces, which does not need area files.
+    area_model: "quadratic" (default) or "linear", see voxeldepths_from_surfaces. The quadratic model also
+    uses the vertex areas of the midthickness surface, which are calculated from the white and pial surfaces.
     """
+    if area_model not in ("quadratic", "linear"):
+        raise ValueError(f"area_model must be 'quadratic' or 'linear', not {area_model!r}")
     if (not os.path.isfile(depths_fname)
         or not os.path.isfile(columns_fname)
         or force == True):
@@ -582,6 +672,10 @@ def process_voxeldepth_from_surfaces(
         area_pial_lh = load_vertex_area(area_pial_lh_file, surf_pial_lh_file)
         area_white_rh = load_vertex_area(area_white_rh_file, surf_white_rh_file)
         area_pial_rh = load_vertex_area(area_pial_rh_file, surf_pial_rh_file)
+        # midthickness areas for the quadratic area model
+        quadratic = method == "equivol" and area_model == "quadratic"
+        area_mid_lh = calc_mid_vertex_area(surf_white_lh_file, surf_pial_lh_file) if quadratic else None
+        area_mid_rh = calc_mid_vertex_area(surf_white_rh_file, surf_pial_rh_file) if quadratic else None
 
         # merge hemispheres (but if labels are provided, only use the hemisphere with labels)
         if label_lh_fname is not None and label_rh_fname is None:
@@ -589,20 +683,23 @@ def process_voxeldepth_from_surfaces(
             surf_pial = surf_pial_lh
             area_white = area_white_lh
             area_pial = area_pial_lh
+            area_mid = area_mid_lh
         elif label_rh_fname is not None and label_lh_fname is None:
             surf_white = surf_white_rh
             surf_pial = surf_pial_rh
             area_white = area_white_rh
             area_pial = area_pial_rh
-        else:               
+            area_mid = area_mid_rh
+        else:
             surf_white = merge_surfaces(surf_white_lh, surf_white_rh)
             surf_pial = merge_surfaces(surf_pial_lh, surf_pial_rh)
             area_white = np.concatenate((area_white_lh, area_white_rh), axis=0)
             area_pial = np.concatenate((area_pial_lh, area_pial_rh), axis=0)
+            area_mid = np.concatenate((area_mid_lh, area_mid_rh), axis=0) if quadratic else None
 
         # calc voxel depths
         depths, columns = calc_depth_from_surfaces_on_grid(
-            surf_white, area_white, surf_pial, area_pial, n_x, n_y, n_z, method, n_jobs)
+            surf_white, area_white, surf_pial, area_pial, n_x, n_y, n_z, method, n_jobs, area_mid)
 
         # generate output nifti using affine of the used voxel grid (upsampled or not)
         xform = grid_to_scanner

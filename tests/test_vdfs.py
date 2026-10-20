@@ -106,9 +106,20 @@ def test_equidist_depths(data):
 
 
 def test_equivol_depths(data):
-    # all intermediate sheets are flat, so the equi-distance fraction of each voxel is its relative
-    # height, and the equi-volume depth beta has to map to it via alpha_from_beta (pial area 4x white area)
+    # the pial sheet is the white sheet scaled by 2 in x and y and moved up, so all intermediate sheets are
+    # flat (at relative height alpha) and their area grows as (1 + alpha)^2: the exact equi-volume depth is
+    # ((1 + alpha)^3 - 1) / 7, which the (default) quadratic area model reproduces
     depths, _ = run(data, "fs")
+    idx, alpha = interior()
+    d = depths[idx]
+    assert not np.isnan(d).any()
+    np.testing.assert_allclose(d, np.broadcast_to(((1 + alpha) ** 3 - 1) / 7, d.shape), atol=1e-6)
+
+
+def test_equivol_depths_linear_area_model(data):
+    # the linear-area model maps the equi-volume depth to the relative height via alpha_from_beta
+    # (pial area 4x white area)
+    depths, _ = run(data, "fs", area_model="linear")
     idx, alpha = interior()
     d = depths[idx]
     assert not np.isnan(d).any()
@@ -215,3 +226,20 @@ def test_alpha_from_beta_preserves_volume():
         for beta in np.linspace(0, 1, 11):
             alpha = vdfs.alpha_from_beta(beta, aw, ap)
             assert (2 * aw * alpha + (ap - aw) * alpha ** 2) / (aw + ap) == pytest.approx(beta, abs=1e-12)
+
+
+def test_alpha_from_beta_quadratic_preserves_volume():
+    # with A(alpha) = aw (1-alpha)^2 + 2 am alpha (1-alpha) + ap alpha^2 the volume fraction below alpha,
+    # V(alpha) / V(1), must equal beta; for a sphere shell am = sqrt(aw ap)
+    for aw, ap, am in ((1.0, 4.0, 2.0), (4.0, 1.0, 2.0), (1.0, 3.0, 1.5), (0.5, 2.0, 1.4), (2.0, 0.3, 0.6)):
+        V = lambda a: aw * (a - a ** 2 + a ** 3 / 3) + am * (a ** 2 - 2 * a ** 3 / 3) + ap * a ** 3 / 3
+        for beta in np.linspace(0, 1, 11):
+            alpha = vdfs.alpha_from_beta_quadratic(beta, aw, ap, am)
+            assert V(alpha) / V(1) == pytest.approx(beta, abs=1e-12)
+
+
+def test_alpha_from_beta_quadratic_linear_special_case():
+    # a midthickness area equal to the mean of white and pial area gives the linear-area model
+    for aw, ap in ((1.0, 4.0), (4.0, 1.0), (0.7, 0.7)):
+        for beta in np.linspace(0, 1, 11):
+            assert vdfs.alpha_from_beta_quadratic(beta, aw, ap, (aw + ap) / 2) == vdfs.alpha_from_beta(beta, aw, ap)

@@ -139,7 +139,7 @@ for name in ("eggcrate", "sphere_crown", "sphere_fundus"):
     eqd, eqv, *_ = G.exact_depths(name, xyz)
     exact = np.where((eqd > 0) & (eqd < 1), eqv, np.nan)
     c = dict(geo=geo, exact=exact, ext=extent(geo["origin"], geo["shape"]),
-             vd={v: load_vdfs(name, v) for v in ("equidist", "current", "wagstyl")})
+             vd={v: load_vdfs(name, v) for v in ("equidist", "current", "wagstyl", "quadratic")})
     for it in (100, 1000):
         c[f"large{it}"], c[f"large_truth{it}"] = large_cropped(name, it)
     c["box1000"] = load_ln2(name, "vdfs", 1000, c["vd"]["equidist"])
@@ -150,17 +150,19 @@ for theme, t in THEMES.items():
     s = lambda c, a: slice_y0(a, c["geo"]["origin"])
 
     # folded sheet and spheres: layers (top) and errors against the exact depth (bottom)
-    for name, size, lim in (("eggcrate", (16, 6.4), 0.05), ("sphere_crown", (14, 6.6), 0.04),
-                            ("sphere_fundus", (14, 6.6), 0.04)):
+    for name, size, lim in (("eggcrate", (20, 6.4), 0.05), ("sphere_crown", (17.5, 6.6), 0.04),
+                            ("sphere_fundus", (17.5, 6.6), 0.04)):
         c = cases[name]
-        fig, axes = plt.subplots(2, 4, figsize=size, facecolor=t["bg"])
+        fig, axes = plt.subplots(2, 5, figsize=size, facecolor=t["bg"])
         tops = [(c["exact"], "exact equi-volume layers"), (c["vd"]["current"], "vdfs, current formula"),
-                (c["vd"]["wagstyl"], "vdfs, Wagstyl formula"), (c["large1000"], "LayNii, smoothing 1000")]
+                (c["vd"]["wagstyl"], "vdfs, Wagstyl formula"), (c["vd"]["quadratic"], "vdfs, quadratic area model"),
+                (c["large1000"], "LayNii, smoothing 1000")]
         for ax, (d, title) in zip(axes[0], tops):
             show_layers(ax, s(c, d), c["ext"], t)
             style(ax, t, title)
         bottoms = [(c["vd"]["current"] - c["exact"], "error, current formula", lim),
                    (c["vd"]["wagstyl"] - c["exact"], "error, Wagstyl formula", lim),
+                   (c["vd"]["quadratic"] - c["exact"], "error, quadratic area model", lim),
                    (c["large100"] - c["large_truth100"], "error, LayNii, smoothing 100", 0.15),
                    (c["large1000"] - c["large_truth1000"], "error, LayNii, smoothing 1000", 0.15)]
         for ax, (e, title, l) in zip(axes[1], bottoms):

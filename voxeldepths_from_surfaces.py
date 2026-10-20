@@ -174,11 +174,12 @@ def numba_calc_bounding_prisms(faces, vertices_white, vertices_pial, n_x, n_y, n
     in the prism. The actual containment is then checked in the calc_depth_from_surfaces_voxelidx
     function.
     The result is a 4D array with dimensions (n_x, n_y, n_z, n_prisms) where n_prisms is the
-    maximum number of prisms that can contain a voxel.
+    maximum number of prisms that can contain a voxel. Unused entries are -1.
     """
     # we initialize the array that will hold the list of prisms indices for each voxel
-    # as length 1, we will extend it as prisms are added, zero is used as a sentinel value 
-    bounding_prisms = np.zeros((n_x, n_y, n_z, 1), dtype=np.int64)
+    # as length 1, we will extend it as prisms are added, -1 is used as a sentinel value
+    # (0 cannot be used, because it is the index of the first prism)
+    bounding_prisms = np.full((n_x, n_y, n_z, 1), -1, dtype=np.int64)
 
     # for each prism we find the bounding box in voxel space, that is the range of 
     # voxel indices that contain the prism and add the prism index to lists of all these voxels
@@ -210,13 +211,13 @@ def numba_calc_bounding_prisms(faces, vertices_white, vertices_pial, n_x, n_y, n
                 for z_idx in z_idx_range:
                     # find next available list index
                     # first check if the index list of any voxel is full already
-                    available_indcs = np.argwhere(bounding_prisms[x_idx, y_idx, z_idx, :] == 0)
+                    available_indcs = np.argwhere(bounding_prisms[x_idx, y_idx, z_idx, :] == -1)
                     if available_indcs.size == 0:
                         # if full, extend the prism list by doubling its length
                         old_length = int(bounding_prisms.shape[3])
                         bounding_prisms = np.concatenate((bounding_prisms,
-                                                          np.zeros((n_x, n_y, n_z, old_length),
-                                                                    dtype=np.int64)),
+                                                          np.full((n_x, n_y, n_z, old_length), -1,
+                                                                  dtype=np.int64)),
                                                           axis=3)
                         next_available_idx = old_length
                     else:
@@ -247,9 +248,9 @@ def calc_depth_from_surfaces_voxelidx(voxelidx,
         p = np.array(voxelidx)
     prism_idx = 0
     # go through all prisms that potentially contain the voxel
-    # (check the list length first, a full list has no sentinel at its end)
+    # (check the list length first, a full list has no -1 sentinel at its end)
     while (prism_idx < bounding_prisms.shape[3]
-           and bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != 0):
+           and bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != -1):
         # get vertices of the prism 
         canditate_prism_idx = bounding_prisms[x_idx, y_idx, z_idx, prism_idx]
         a1 = vertices_white[faces[canditate_prism_idx, 0], :]
@@ -315,7 +316,8 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
                                                  n_x, n_y, n_z)
 
     # only need to calculate depths for voxels that potentially are inside a prism
-    roi = np.argwhere(np.any(bounding_prisms, axis=3))
+    # (lists are filled from the start, so the first entry is used if any is)
+    roi = np.argwhere(bounding_prisms[:, :, :, 0] != -1)
 
     # calculate depths in parallel by calling calc_depth_from_surfaces_voxelidx for each voxel
     # in the roi

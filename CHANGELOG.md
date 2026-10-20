@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased (2.0.0)
+
+Fixes:
+- Points lying exactly on a boundary between prisms (e.g. voxel centres on a mesh symmetry plane) could get no depth, because rounding placed them marginally outside every adjacent intermediate triangle. Points within a tiny tolerance of a triangle edge (`EDGE_TOLERANCE`, 1e-6 of the edge length) now count as inside (#10).
+
 ## 1.1.0
 
 New:

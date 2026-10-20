@@ -189,3 +189,21 @@ def test_mismatching_surfaces_are_rejected():
     pial = dict(white, tris=np.array([[0, 2, 1]]))
     with pytest.raises(ValueError):
         vdfs.calc_depth_from_surfaces_on_grid(white, np.ones(3), pial, np.ones(3), 2, 2, 2, "equivol")
+
+
+
+def test_point_on_boundary_between_prisms():
+    # two neighbouring prisms of a sphere mesh (grid coordinates), sharing a side face that contains the point;
+    # rounding places the point marginally outside both intermediate triangles unless the boundary counts (#10)
+    p = np.array([28.0, 3.0, 17.0])
+    white = np.array([[28.0, 11.176604412187725, 3.2208258672652796], [28.0, 13.098956298631903, 4.318878802133362],
+                      [25.89575818726388, 11.79846333781229, 3.5151299502168527],
+                      [30.10424181273612, 11.79846333781229, 3.5151299502168527]])
+    pial = np.array([[28.0, -1.440942278671482, 23.636445267714237], [28.0, 1.923173522605829, 25.558037903733386],
+                     [24.317576827711793, -0.3526891588284933, 24.151477412879494],
+                     [31.682423172288207, -0.3526891588284933, 24.151477412879494]])
+    faces = np.array([[0, 1, 2], [0, 3, 1]])
+    bounding_prisms = np.array([[[[0, 1]]]])
+    d, c = vdfs.calc_depth_from_surfaces_voxelidx((0, 0, 0), faces, white, pial, np.ones(4), np.ones(4),
+                                                  bounding_prisms, p=p, method="equidist")
+    assert d == pytest.approx(0.6679147, abs=1e-6)

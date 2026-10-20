@@ -176,20 +176,28 @@ def equivol_plane(a1, b1, c1, a2, b2, c2, beta, aw_a, aw_b, aw_c, ap_a, ap_b, ap
     return intermediate_plane(a1, b1, c1, a2, b2, c2, alpha_a, alpha_b, alpha_c)
 
 
+# Points closer than this fraction of the edge length to a triangle edge count as being on the edge.
+# This accepts points on the boundary between neighbouring prisms, which rounding in the depth calculation
+# can otherwise place marginally outside of all of them (#10).
+EDGE_TOLERANCE = 1e-6
+
+
 @jit(nopython=True)
 def same_side(p1, p2, a, b):
-    """Tests if two points p1 and p2 are on the same side of the line defined by a and b."""
+    """Tests if two points p1 and p2 are on the same side of the line defined by a and b.
+    p1 also counts as being on the same side if it lies on the line (within EDGE_TOLERANCE)."""
     cp1 = np.cross(b - a, p1 - a)
     cp2 = np.cross(b - a, p2 - a)
     if np.dot(cp1, cp2) >= 0:
         return True
-    else:
-        return False
+    # distance of p1 from the line, |cp1| / |b - a|, compared with EDGE_TOLERANCE * |b - a|
+    edge_length_sq = np.dot(b - a, b - a)
+    return np.dot(cp1, cp1) <= (EDGE_TOLERANCE * edge_length_sq) ** 2
 
 
 @jit(nopython=True)
 def test_point_inside_triangle(p, a, b, c):
-    """Tests if a point p is inside a triangle defined by vertices a, b, c."""
+    """Tests if a point p is inside a triangle defined by vertices a, b, c (boundary included)."""
     if same_side(p, a, b, c) and same_side(p, b, a, c) and same_side(p, c, a, b):
         return True
     else:

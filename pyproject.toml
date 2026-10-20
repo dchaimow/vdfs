@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vdfs"
+version = "1.1.0"
+description = "Voxel depths from surfaces: equi-volume and equi-distance cortical depths for arbitrary voxel grids"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Denis Chaimow" }]
+dependencies = ["numpy", "scipy", "nibabel", "numba", "joblib"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/dchaimow/vdfs"
+
+# the repository root is the package directory, so that a checkout named vdfs
+# (e.g. a git submodule) can be imported directly with `import vdfs`
+[tool.setuptools]
+package-dir = { "vdfs" = "." }
+packages = ["vdfs"]

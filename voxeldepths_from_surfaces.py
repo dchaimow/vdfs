@@ -7,9 +7,77 @@ from joblib import Parallel, delayed, parallel_backend
 import os
 
 
+def is_gifti(fname):
+    """Tests if a file is a gifti file (based on its extension)."""
+    return str(fname).endswith(".gii")
+
+
+def read_surf_geometry(surf_file):
+    """
+    Reads vertex coordinates and faces of a freesurfer or gifti surface.
+    Returns coords, faces and the freesurfer to scanner transformation. For freesurfer surfaces this
+    is a translation by the c_ras stored in the surface file, gifti surface coordinates are assumed
+    to already be in scanner space (identity transformation).
+    """
+    fs_to_scanner = np.eye(4)
+    if is_gifti(surf_file):
+        surf_gii = nib.load(surf_file)
+        coords = surf_gii.agg_data("NIFTI_INTENT_POINTSET")
+        faces = surf_gii.agg_data("NIFTI_INTENT_TRIANGLE")
+    else:
+        coords, faces, volume_info = nib.freesurfer.read_geometry(
+            surf_file, read_metadata=True
+        )
+        if "cras" not in volume_info:
+            raise ValueError(f"freesurfer surface {surf_file} contains no volume info (c_ras), "
+                             "cannot transform it to scanner space")
+        fs_to_scanner[:3, 3] = volume_info["cras"]
+    return coords, faces, fs_to_scanner
+
+
+def read_label_vertices(label_file):
+    """
+    Reads the vertex indices of a label. Either a freesurfer label file or a gifti file
+    (e.g. .label.gii or .func.gii) that is interpreted as a vertex mask (all vertices with nonzero values).
+    """
+    if is_gifti(label_file):
+        return np.flatnonzero(nib.load(label_file).agg_data())
+    return nib.freesurfer.read_label(label_file)
+
+
+def calc_vertex_area(coords, faces):
+    """
+    Calculates the area of each vertex as one third of the summed areas of all triangles that contain it.
+    This is identical to the freesurfer ?h.area and ?h.area.pial files (up to float32 precision).
+    Coordinates should be in mm (i.e. not in voxel grid space) and all faces of the surface should be
+    included (i.e. before restricting to a label).
+    """
+    coords = np.asarray(coords, dtype=np.float64)
+    faces = np.asarray(faces, dtype=np.int64)
+    v0, v1, v2 = coords[faces[:, 0]], coords[faces[:, 1]], coords[faces[:, 2]]
+    face_area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
+    area = np.zeros(coords.shape[0])
+    for i in range(3):
+        np.add.at(area, faces[:, i], face_area / 3)
+    return area
+
+
+def load_vertex_area(area_file=None, surf_file=None):
+    """
+    Loads vertex areas from a freesurfer area file (e.g. lh.area) or a gifti metric file. If no area file
+    is provided, the vertex areas are calculated from the surface (see calc_vertex_area).
+    """
+    if area_file is not None:
+        if is_gifti(area_file):
+            return nib.load(area_file).agg_data()
+        return nib.freesurfer.read_morph_data(area_file)
+    coords, faces, _ = read_surf_geometry(surf_file)
+    return calc_vertex_area(coords, faces)
+
+
 def load_fs_surf_in_scanner_space(surf_file):
     """
-    Loads a freesurfer surface in scanner space (only doing freesurfer to scanner transformation).
+    Loads a freesurfer or gifti surface in scanner space (only doing freesurfer to scanner transformation).
     """
     surf = load_fs_surf_in_grid(surf_file, np.eye(4))
     return surf
@@ -17,45 +85,54 @@ def load_fs_surf_in_scanner_space(surf_file):
 
 def load_fs_surf_in_grid(surf_file, grid_to_scanner, label_file=None):
     """
-    Loads a freesurfer surface and transforms coordinates from freesurfer space to grid space,
+    Loads a freesurfer or gifti surface and transforms coordinates from freesurfer space to grid space,
     by using the grid_to_scanner transformation (e.g. affine function a functional nifti image).
+    If a label file is provided, only triangles with all vertices inside the label are kept. Besides
+    vertices and triangles, the returned surface contains the original index of each triangle
+    ("tris_idx") and the original number of triangles ("nTrisOrig").
     """
-    # load freesurfer surface
-    coords, faces, volume_info = nib.freesurfer.read_geometry(
-        surf_file, read_metadata=True
-    )
+    # load freesurfer or gifti surface
+    coords, faces, fs_to_scanner = read_surf_geometry(surf_file)
+    n_tris_orig = faces.shape[0]
+    tris_idx = np.arange(n_tris_orig)
 
     # if label file provided
     if label_file is not None:
-        label = nib.freesurfer.read_label(label_file)
+        label = read_label_vertices(label_file)
         vertex_mask = np.zeros(coords.shape[0], dtype=bool)
         vertex_mask[label] = True
         # remove all triangles that contain vertices that are not in the label
         face_mask = np.all(vertex_mask[faces],axis=1)
         faces = faces[face_mask]
+        tris_idx = tris_idx[face_mask]
 
     surf = dict()
     surf["nVertices"] = coords.shape[0]
     surf["nTris"] = faces.shape[0]
-    fs_to_scanner = np.eye(4)
-    fs_to_scanner[:3, 3] = volume_info["cras"]
+    surf["nTrisOrig"] = n_tris_orig
     grid_to_scanner = np.matrix(grid_to_scanner)
     fs_to_voxel = grid_to_scanner.I @ fs_to_scanner
     surf["vertices"] = np.array(fs_to_voxel.dot(
         np.hstack((coords, np.ones((surf["nVertices"], 1)))).T).T[:, :3])
     surf["tris"] = np.array(faces, dtype=np.int64)
+    surf["tris_idx"] = tris_idx
     return surf
 
 
 def merge_surfaces(surf1, surf2):
     """
-    Merges separate representations of two surfaces into one.
+    Merges separate representations of two surfaces into one. Original triangle indices of the second
+    surface are offset by the original number of triangles of the first surface.
     """
     surf = dict()
     surf["nTris"] = surf1["nTris"] + surf2["nTris"]
     surf["nVertices"] = surf1["nVertices"] + surf2["nVertices"]
     surf["vertices"] = np.array(np.concatenate((surf1["vertices"], surf2["vertices"])))
     surf["tris"] = np.concatenate((surf1["tris"], surf2["tris"] + surf1["nVertices"]))
+    n_tris_orig_1 = surf1.get("nTrisOrig", surf1["nTris"])
+    surf["nTrisOrig"] = n_tris_orig_1 + surf2.get("nTrisOrig", surf2["nTris"])
+    surf["tris_idx"] = np.concatenate((surf1.get("tris_idx", np.arange(surf1["nTris"])),
+                                       surf2.get("tris_idx", np.arange(surf2["nTris"])) + n_tris_orig_1))
     return surf
 
 
@@ -63,7 +140,10 @@ def merge_surfaces(surf1, surf2):
 def alpha_from_beta(beta, aw, ap):
     """Calculates the relative equi-distance depth alpha from relative equi-volume depth
     beta, using the local area of the bottom (white) and top (pial) vertex.
+    If both areas are zero, alpha equals beta (equi-distance).
     """
+    if ap + aw == 0:
+        return beta
     alpha = (2 * ap * beta - ap * beta**2 + aw * beta**2) / (ap + aw)
     return alpha
 
@@ -174,11 +254,12 @@ def numba_calc_bounding_prisms(faces, vertices_white, vertices_pial, n_x, n_y, n
     in the prism. The actual containment is then checked in the calc_depth_from_surfaces_voxelidx
     function.
     The result is a 4D array with dimensions (n_x, n_y, n_z, n_prisms) where n_prisms is the
-    maximum number of prisms that can contain a voxel.
+    maximum number of prisms that can contain a voxel. Unused entries are -1.
     """
     # we initialize the array that will hold the list of prisms indices for each voxel
-    # as length 1, we will extend it as prisms are added, zero is used as a sentinel value 
-    bounding_prisms = np.zeros((n_x, n_y, n_z, 1), dtype=np.int64)
+    # as length 1, we will extend it as prisms are added, -1 is used as a sentinel value
+    # (0 cannot be used, because it is the index of the first prism)
+    bounding_prisms = np.full((n_x, n_y, n_z, 1), -1, dtype=np.int64)
 
     # for each prism we find the bounding box in voxel space, that is the range of 
     # voxel indices that contain the prism and add the prism index to lists of all these voxels
@@ -210,13 +291,13 @@ def numba_calc_bounding_prisms(faces, vertices_white, vertices_pial, n_x, n_y, n
                 for z_idx in z_idx_range:
                     # find next available list index
                     # first check if the index list of any voxel is full already
-                    available_indcs = np.argwhere(bounding_prisms[x_idx, y_idx, z_idx, :] == 0)
+                    available_indcs = np.argwhere(bounding_prisms[x_idx, y_idx, z_idx, :] == -1)
                     if available_indcs.size == 0:
                         # if full, extend the prism list by doubling its length
                         old_length = int(bounding_prisms.shape[3])
                         bounding_prisms = np.concatenate((bounding_prisms,
-                                                          np.zeros((n_x, n_y, n_z, old_length),
-                                                                    dtype=np.int64)),
+                                                          np.full((n_x, n_y, n_z, old_length), -1,
+                                                                  dtype=np.int64)),
                                                           axis=3)
                         next_available_idx = old_length
                     else:
@@ -242,13 +323,16 @@ def calc_depth_from_surfaces_voxelidx(voxelidx,
     the voxelidx is the artifical voxel within wich p is contained.
     As soon as a solution is found that is inside the prism, the depth is returned.    
     """
+    if method not in ("equivol", "equidist"):
+        raise ValueError(f"method must be 'equivol' or 'equidist', not {method!r}")
     x_idx, y_idx, z_idx = voxelidx
     if p is None:
         p = np.array(voxelidx)
     prism_idx = 0
     # go through all prisms that potentially contain the voxel
-    while ((bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != 0) 
-           and prism_idx < bounding_prisms.shape[3]):
+    # (check the list length first, a full list has no -1 sentinel at its end)
+    while (prism_idx < bounding_prisms.shape[3]
+           and bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != -1):
         # get vertices of the prism 
         canditate_prism_idx = bounding_prisms[x_idx, y_idx, z_idx, prism_idx]
         a1 = vertices_white[faces[canditate_prism_idx, 0], :]
@@ -301,8 +385,19 @@ def numba_assign_calc_depth_results(results, roi, grid_size):
 def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pial,
                                      n_x, n_y, n_z, method, n_jobs=32):
     """
-    Calculate voxel grid depths from surfaces given all surface information (assumed to be in voxel grid space)
+    Calculate voxel grid depths from surfaces given all surface information (assumed to be in voxel grid space).
+    White and pial surface need to have the same vertices and triangles (i.e. correspond to each other),
+    vertex areas need to be provided for all surface vertices.
+    Returns depths and columns, the index of the triangle (prism) that contains each voxel center. If the
+    surfaces contain the original triangle indices ("tris_idx", e.g. when restricted to a label),
+    these are used for the columns.
     """
+    if surf_white["nVertices"] != surf_pial["nVertices"] or not np.array_equal(
+            surf_white["tris"], surf_pial["tris"]):
+        raise ValueError("white and pial surfaces need to have the same vertices and triangles")
+    if len(area_white) != surf_white["nVertices"] or len(area_pial) != surf_pial["nVertices"]:
+        raise ValueError("number of vertex areas does not match number of surface vertices")
+
     faces = surf_pial["tris"]
     vertices_white = surf_white["vertices"]
     vertices_pial = surf_pial["vertices"]
@@ -314,7 +409,10 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
                                                  n_x, n_y, n_z)
 
     # only need to calculate depths for voxels that potentially are inside a prism
-    roi = np.argwhere(np.any(bounding_prisms, axis=3))
+    # (lists are filled from the start, so the first entry is used if any is)
+    roi = np.argwhere(bounding_prisms[:, :, :, 0] != -1)
+    if len(roi) == 0:
+        return np.full((n_x, n_y, n_z), np.nan), np.full((n_x, n_y, n_z), np.nan)
 
     # calculate depths in parallel by calling calc_depth_from_surfaces_voxelidx for each voxel
     # in the roi
@@ -338,7 +436,61 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
     depths, columns = numba_assign_calc_depth_results(
         results, roi, bounding_prisms.shape[:3])
 
+    # translate prism indices into original triangle indices
+    if "tris_idx" in surf_pial:
+        in_prism = ~np.isnan(columns)
+        columns[in_prism] = surf_pial["tris_idx"][columns[in_prism].astype(np.int64)]
+
     return depths, columns
+
+
+def voxeldepths_from_surfaces(
+    surf_white_lh_file,
+    surf_pial_lh_file,
+    surf_white_rh_file,
+    surf_pial_rh_file,
+    volume_file,
+    depths_fname,
+    columns_fname,
+    *,
+    label_lh_fname=None,
+    label_rh_fname=None,
+    method="equivol",
+    upsample_factor=None,
+    n_jobs=32,
+    force=False):
+    """
+    Calculate voxel depths from surfaces and save them to nifti files (main entry function).
+
+    Surfaces can be freesurfer (e.g. lh.white, lh.pial) or gifti (.gii) files. Freesurfer surface
+    coordinates are transformed to scanner space using the c_ras stored in the surface file, gifti
+    surface coordinates are assumed to already be in scanner space.
+    Vertex areas (needed for method="equivol") are calculated from the surfaces, which gives the same
+    values as the freesurfer ?h.area and ?h.area.pial files. To use area files instead, use
+    process_voxeldepth_from_surfaces.
+
+    surf_white_lh_file, surf_pial_lh_file, surf_white_rh_file, surf_pial_rh_file: surface files
+    volume_file: nifti file that determines the voxel grid and affine of the output
+    depths_fname: output nifti file with voxel depths (0 = white, 1 = pial, NaN outside of the ribbon)
+    columns_fname: output nifti file with the index of the triangle (prism) that contains each voxel center
+        (if both hemispheres are used, right hemisphere triangle indices are offset by the number of
+        left hemisphere triangles)
+    label_lh_fname, label_rh_fname: optional freesurfer label or gifti mask (.gii, nonzero vertices) files
+        that restrict the calculation to triangles inside the label. If a label is provided for only one
+        hemisphere, the other hemisphere is ignored.
+    method: "equivol" (equi-volume) or "equidist" (equi-distance) depths
+    upsample_factor: optional upsampling of the voxel grid
+    n_jobs: number of parallel jobs
+    force: if False and both output files exist, they are loaded instead of recalculated
+
+    Returns the depths and columns nifti images.
+    """
+    return process_voxeldepth_from_surfaces(
+        surf_white_lh_file, None, surf_pial_lh_file, None,
+        surf_white_rh_file, None, surf_pial_rh_file, None,
+        volume_file, depths_fname, columns_fname,
+        label_lh_fname=label_lh_fname, label_rh_fname=label_rh_fname, method=method,
+        upsample_factor=upsample_factor, n_jobs=n_jobs, force=force)
 
 
 def process_voxeldepth_from_surfaces(
@@ -360,9 +512,13 @@ def process_voxeldepth_from_surfaces(
     n_jobs=32,
     force=False):
     """
-    Calculate voxel depths from surfaces and save to nifti files.
-    This function is the entry function for the voxeldepths_from_surfaces.py script.
-    It loads the surfaces and areas, calculates the depths and saves them to nifti files.
+    Calculate voxel depths from surfaces and vertex area files and save them to nifti files.
+
+    Same as voxeldepths_from_surfaces, but with an area file following each surface file
+    (original interface of vdfs <= 1.0, kept for compatibility and for using precomputed areas).
+    Area files can be freesurfer (e.g. lh.area, lh.area.pial) or gifti metric files. If an area file is
+    None, the vertex areas are calculated from the corresponding surface (identical to the freesurfer
+    area files). New code should use voxeldepths_from_surfaces, which does not need area files.
     """
     if (not os.path.isfile(depths_fname)
         or not os.path.isfile(columns_fname)
@@ -400,11 +556,11 @@ def process_voxeldepth_from_surfaces(
             surf_pial_rh = load_fs_surf_in_grid(surf_pial_rh_file, grid_to_scanner)
 
 
-        # load area files
-        area_white_lh = nib.freesurfer.read_morph_data(area_white_lh_file)
-        area_pial_lh = nib.freesurfer.read_morph_data(area_pial_lh_file)
-        area_white_rh = nib.freesurfer.read_morph_data(area_white_rh_file)
-        area_pial_rh = nib.freesurfer.read_morph_data(area_pial_rh_file)
+        # load area files (or calculate areas from the surfaces in mm and with all triangles)
+        area_white_lh = load_vertex_area(area_white_lh_file, surf_white_lh_file)
+        area_pial_lh = load_vertex_area(area_pial_lh_file, surf_pial_lh_file)
+        area_white_rh = load_vertex_area(area_white_rh_file, surf_white_rh_file)
+        area_pial_rh = load_vertex_area(area_pial_rh_file, surf_pial_rh_file)
 
         # merge hemispheres (but if labels are provided, only use the hemisphere with labels)
         if label_lh_fname is not None and label_rh_fname is None:
@@ -442,3 +598,7 @@ def process_voxeldepth_from_surfaces(
         nii_depths = nib.load(depths_fname)
         nii_columns = nib.load(columns_fname)
     return nii_depths, nii_columns
+
+
+# name used in fmri_analysis before vdfs was a separate package
+process_dc_voxeldepth_from_surfaces = process_voxeldepth_from_surfaces

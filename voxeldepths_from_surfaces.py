@@ -247,8 +247,9 @@ def calc_depth_from_surfaces_voxelidx(voxelidx,
         p = np.array(voxelidx)
     prism_idx = 0
     # go through all prisms that potentially contain the voxel
-    while ((bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != 0) 
-           and prism_idx < bounding_prisms.shape[3]):
+    # (check the list length first, a full list has no sentinel at its end)
+    while (prism_idx < bounding_prisms.shape[3]
+           and bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != 0):
         # get vertices of the prism 
         canditate_prism_idx = bounding_prisms[x_idx, y_idx, z_idx, prism_idx]
         a1 = vertices_white[faces[canditate_prism_idx, 0], :]

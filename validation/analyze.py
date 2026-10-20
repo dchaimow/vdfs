@@ -19,6 +19,7 @@ METHODS = {  # key: label
     "vdfs_equidist": "vdfs equi-distance",
     "vdfs_current": "vdfs, current formula",
     "vdfs_wagstyl": "vdfs, Wagstyl formula",
+    "vdfs_quadratic": "vdfs, quadratic area model",
     "ln2_vdfs_s100": "LayNii, vdfs box, smoothing 100",
     "ln2_vdfs_s1000": "LayNii, vdfs box, smoothing 1000",
     "ln2_large_s100": "LayNii, large box, smoothing 100",
@@ -55,7 +56,7 @@ for name in G.GEOMETRIES:
     exact_ribbon = (eqd > 0) & (eqd < 1)
     patches = G.patch_masks(name, xyz, foot)
     depth = {}
-    for v in ("equidist", "current", "wagstyl"):
+    for v in ("equidist", "current", "wagstyl", "quadratic"):
         depth[f"vdfs_{v}"] = np.load(res_dir / "out" / f"{name}_{v}.npz")["depths"]
     vdfs_ribbon = ~np.isnan(depth["vdfs_equidist"])
     checks = {"vdfs equi-distance vs exact": depth["vdfs_equidist"][vdfs_ribbon] - eqd[vdfs_ribbon]}

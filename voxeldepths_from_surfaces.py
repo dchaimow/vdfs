@@ -63,7 +63,10 @@ def merge_surfaces(surf1, surf2):
 def alpha_from_beta(beta, aw, ap):
     """Calculates the relative equi-distance depth alpha from relative equi-volume depth
     beta, using the local area of the bottom (white) and top (pial) vertex.
+    If both areas are zero, alpha equals beta (equi-distance).
     """
+    if ap + aw == 0:
+        return beta
     alpha = (2 * ap * beta - ap * beta**2 + aw * beta**2) / (ap + aw)
     return alpha
 

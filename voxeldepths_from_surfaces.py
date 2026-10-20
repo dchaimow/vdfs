@@ -318,6 +318,8 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
     # only need to calculate depths for voxels that potentially are inside a prism
     # (lists are filled from the start, so the first entry is used if any is)
     roi = np.argwhere(bounding_prisms[:, :, :, 0] != -1)
+    if len(roi) == 0:
+        return np.full((n_x, n_y, n_z), np.nan), np.full((n_x, n_y, n_z), np.nan)
 
     # calculate depths in parallel by calling calc_depth_from_surfaces_voxelidx for each voxel
     # in the roi

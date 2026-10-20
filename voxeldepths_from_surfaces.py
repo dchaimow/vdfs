@@ -35,6 +35,16 @@ def read_surf_geometry(surf_file):
     return coords, faces, fs_to_scanner
 
 
+def read_label_vertices(label_file):
+    """
+    Reads the vertex indices of a label. Either a freesurfer label file or a gifti file
+    (e.g. .label.gii or .func.gii) that is interpreted as a vertex mask (all vertices with nonzero values).
+    """
+    if is_gifti(label_file):
+        return np.flatnonzero(nib.load(label_file).agg_data())
+    return nib.freesurfer.read_label(label_file)
+
+
 def load_fs_surf_in_scanner_space(surf_file):
     """
     Loads a freesurfer or gifti surface in scanner space (only doing freesurfer to scanner transformation).
@@ -58,7 +68,7 @@ def load_fs_surf_in_grid(surf_file, grid_to_scanner, label_file=None):
 
     # if label file provided
     if label_file is not None:
-        label = nib.freesurfer.read_label(label_file)
+        label = read_label_vertices(label_file)
         vertex_mask = np.zeros(coords.shape[0], dtype=bool)
         vertex_mask[label] = True
         # remove all triangles that contain vertices that are not in the label

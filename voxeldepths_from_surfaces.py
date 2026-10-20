@@ -246,6 +246,8 @@ def calc_depth_from_surfaces_voxelidx(voxelidx,
     the voxelidx is the artifical voxel within wich p is contained.
     As soon as a solution is found that is inside the prism, the depth is returned.    
     """
+    if method not in ("equivol", "equidist"):
+        raise ValueError(f"method must be 'equivol' or 'equidist', not {method!r}")
     x_idx, y_idx, z_idx = voxelidx
     if p is None:
         p = np.array(voxelidx)
@@ -306,8 +308,16 @@ def numba_assign_calc_depth_results(results, roi, grid_size):
 def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pial,
                                      n_x, n_y, n_z, method, n_jobs=32):
     """
-    Calculate voxel grid depths from surfaces given all surface information (assumed to be in voxel grid space)
+    Calculate voxel grid depths from surfaces given all surface information (assumed to be in voxel grid space).
+    White and pial surface need to have the same vertices and triangles (i.e. correspond to each other),
+    vertex areas need to be provided for all surface vertices.
     """
+    if surf_white["nVertices"] != surf_pial["nVertices"] or not np.array_equal(
+            surf_white["tris"], surf_pial["tris"]):
+        raise ValueError("white and pial surfaces need to have the same vertices and triangles")
+    if len(area_white) != surf_white["nVertices"] or len(area_pial) != surf_pial["nVertices"]:
+        raise ValueError("number of vertex areas does not match number of surface vertices")
+
     faces = surf_pial["tris"]
     vertices_white = surf_white["vertices"]
     vertices_pial = surf_pial["vertices"]

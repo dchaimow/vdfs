@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vdfs"
-version = "1.1.0"
+version = "2.0.0"
 description = "Voxel depths from surfaces: equi-volume and equi-distance cortical depths for arbitrary voxel grids"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "Denis Chaimow" }]
-dependencies = ["numpy", "scipy", "nibabel", "numba", "joblib"]
+dependencies = ["numpy", "scipy", "nibabel", "numba"]
 
 [project.optional-dependencies]
 test = ["pytest"]

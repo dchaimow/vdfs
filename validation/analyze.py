@@ -17,8 +17,8 @@ LABELS = {"sphere_crown": "Sphere, gyral crown", "sphere_fundus": "Sphere, sulca
 METHODS = {  # key: label
     "exact": "exact equi-volume",
     "vdfs_equidist": "vdfs equi-distance",
-    "vdfs_current": "vdfs, current formula",
-    "vdfs_wagstyl": "vdfs, Wagstyl formula",
+    "vdfs_v1formula": "vdfs <= 1.1 formula",
+    "vdfs_linear": "vdfs, linear area model",
     "vdfs_quadratic": "vdfs, quadratic area model",
     "ln2_vdfs_s100": "LayNii, vdfs box, smoothing 100",
     "ln2_vdfs_s1000": "LayNii, vdfs box, smoothing 1000",
@@ -56,7 +56,7 @@ for name in G.GEOMETRIES:
     exact_ribbon = (eqd > 0) & (eqd < 1)
     patches = G.patch_masks(name, xyz, foot)
     depth = {}
-    for v in ("equidist", "current", "wagstyl", "quadratic"):
+    for v in ("equidist", "v1formula", "linear", "quadratic"):
         depth[f"vdfs_{v}"] = np.load(res_dir / "out" / f"{name}_{v}.npz")["depths"]
     vdfs_ribbon = ~np.isnan(depth["vdfs_equidist"])
     checks = {"vdfs equi-distance vs exact": depth["vdfs_equidist"][vdfs_ribbon] - eqd[vdfs_ribbon]}
@@ -102,4 +102,12 @@ for name in G.GEOMETRIES:
             print(f"    {METHODS[key]:34s} {s['n']:7d}  " + " ".join(f"{x:4.1f}" for x in s["bins"])
                   + f"   {s['max_dev']:4.1f}  |       {s['err_mean']:+.4f} {s['err_rms']:.4f} {s['err_max']:.4f}")
     out["geometries"].append(g)
+# voxel grid aligned with the mesh: ribbon voxels without depth (points on prism boundaries)
+aligned_file = res_dir / "out_aligned_grid" / "sphere_crown_equidist.npz"
+if aligned_file.exists():
+    geo = G.make("sphere_crown", aligned=True)
+    eqd = G.exact_depths("sphere_crown", G.voxel_centers(geo["origin"], geo["shape"]))[0]
+    d = np.load(aligned_file)["depths"]
+    out["aligned_grid_holes"] = int(np.sum((eqd > 0.02) & (eqd < 0.98) & np.isnan(d)))
+    print(f"\nAligned grid (sphere crown): {out['aligned_grid_holes']} ribbon voxels without depth")
 (res_dir / "results.json").write_text(json.dumps(out))

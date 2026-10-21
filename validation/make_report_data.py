@@ -37,7 +37,7 @@ for ratio in (3.0, 1 / 3):
     cur = (2 * ap * beta - ap * beta ** 2 + aw * beta ** 2) / (ap + aw)
     wag = (-aw + np.sqrt((1 - beta) * aw ** 2 + beta * ap ** 2)) / (ap - aw)
     data["formula"].append({"label": f"pial/white area ratio {ratio:.2g}", "x": beta.round(3).tolist(),
-                            "series": {"current": cur.round(4).tolist(), "wagstyl": wag.round(4).tolist()}})
+                            "series": {"v1formula": cur.round(4).tolist(), "linear": wag.round(4).tolist()}})
 # rim sensitivity (laynii_rim_variants.py output)
 geom = None
 for line in (R / "laynii_rim_variants.txt").read_text().splitlines():
@@ -139,7 +139,7 @@ for name in ("eggcrate", "sphere_crown", "sphere_fundus"):
     eqd, eqv, *_ = G.exact_depths(name, xyz)
     exact = np.where((eqd > 0) & (eqd < 1), eqv, np.nan)
     c = dict(geo=geo, exact=exact, ext=extent(geo["origin"], geo["shape"]),
-             vd={v: load_vdfs(name, v) for v in ("equidist", "current", "wagstyl", "quadratic")})
+             vd={v: load_vdfs(name, v) for v in ("equidist", "v1formula", "linear", "quadratic")})
     for it in (100, 1000):
         c[f"large{it}"], c[f"large_truth{it}"] = large_cropped(name, it)
     c["box1000"] = load_ln2(name, "vdfs", 1000, c["vd"]["equidist"])
@@ -154,14 +154,14 @@ for theme, t in THEMES.items():
                             ("sphere_fundus", (17.5, 6.6), 0.04)):
         c = cases[name]
         fig, axes = plt.subplots(2, 5, figsize=size, facecolor=t["bg"])
-        tops = [(c["exact"], "exact equi-volume layers"), (c["vd"]["current"], "vdfs, current formula"),
-                (c["vd"]["wagstyl"], "vdfs, Wagstyl formula"), (c["vd"]["quadratic"], "vdfs, quadratic area model"),
+        tops = [(c["exact"], "exact equi-volume layers"), (c["vd"]["v1formula"], "vdfs <= 1.1 formula"),
+                (c["vd"]["linear"], "vdfs, linear area model"), (c["vd"]["quadratic"], "vdfs, quadratic area model"),
                 (c["large1000"], "LayNii, smoothing 1000")]
         for ax, (d, title) in zip(axes[0], tops):
             show_layers(ax, s(c, d), c["ext"], t)
             style(ax, t, title)
-        bottoms = [(c["vd"]["current"] - c["exact"], "error, current formula", lim),
-                   (c["vd"]["wagstyl"] - c["exact"], "error, Wagstyl formula", lim),
+        bottoms = [(c["vd"]["v1formula"] - c["exact"], "error, vdfs <= 1.1 formula", lim),
+                   (c["vd"]["linear"] - c["exact"], "error, linear area model", lim),
                    (c["vd"]["quadratic"] - c["exact"], "error, quadratic area model", lim),
                    (c["large100"] - c["large_truth100"], "error, LayNii, smoothing 100", 0.15),
                    (c["large1000"] - c["large_truth1000"], "error, LayNii, smoothing 1000", 0.15)]
@@ -193,24 +193,4 @@ for theme, t in THEMES.items():
     fig.tight_layout()
     save(fig, "fig_laynii_box", theme)
 
-    # vdfs: voxels without depth on prism boundaries (aligned grid)
-    name = "sphere_crown"
-    aligned = G.make(name, aligned=True)
-    lo, shape = aligned["origin"], aligned["shape"]
-    d = np.load(R / "out_aligned_grid" / f"{name}_equidist.npz")["depths"]
-    eqd = G.exact_depths(name, G.voxel_centers(lo, shape))[0]
-    inside = (eqd > 0.02) & (eqd < 0.98)
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.0), facecolor=t["bg"])
-    for ax, y, title in [(axes[0], 0.0, "slice y = 0 (a plane containing mesh edges)"),
-                         (axes[1], 0.5, "slice y = 0.5 mm")]:
-        j = int(round((y - lo[1]) / VS))
-        sl, ins = d[:, j, :].T, inside[:, j, :].T
-        img = np.empty(sl.shape + (3,))
-        img[:] = matplotlib.colors.to_rgb(t["nan"])
-        img[~np.isnan(sl)] = matplotlib.colors.to_rgb("#86b6ef")
-        img[ins & np.isnan(sl)] = matplotlib.colors.to_rgb(t["hole"])
-        ax.imshow(img, origin="lower", extent=extent(lo, shape), interpolation="nearest")
-        style(ax, t, title)
-    fig.tight_layout()
-    save(fig, "fig_holes", theme)
 print("written", sorted(p.name for p in FIG.iterdir()))

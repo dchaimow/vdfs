@@ -12,7 +12,7 @@ mkdir -p "$results/out" "$results/out_aligned_grid"
 
 python "$here/make_variants.py" "$results/variants"
 for g in sphere_crown sphere_fundus cylinder_crown eggcrate; do
-    for v in equidist current wagstyl quadratic; do
+    for v in equidist v1formula linear quadratic; do
         python "$here/run_vdfs.py" "$g" "$v" "$results/out"
     done
     # LayNii in the vdfs box (rim from the vdfs depths) and in a large box (rim from the exact geometry)

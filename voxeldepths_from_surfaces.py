@@ -1,9 +1,7 @@
 import numpy as np
 import nibabel as nib
 from scipy.optimize import root_scalar, minimize_scalar
-from numba import jit
-from numba.typed import List
-from joblib import Parallel, delayed, parallel_backend
+from numba import jit, prange, set_num_threads, config
 import os
 
 
@@ -391,74 +389,311 @@ def numba_calc_bounding_prisms(faces, vertices_white, vertices_pial, n_x, n_y, n
     return bounding_prisms
 
 
-def calc_depth_from_surfaces_voxelidx(voxelidx, 
+# ----------------------------------------------------------------------------------------------------------------
+# Intersection of a point with the intermediate surfaces of a prism
+#
+# A point p lies on the intermediate triangle (ma, mb, mc) of a prism if the signed volume
+# plane_side(p, ma, mb, mc) = (p - ma) . ((mb - ma) x (mc - ma)) is zero and p lies inside the triangle.
+# - Equi-distance: all vertices move with the same distance fraction alpha (m = white + alpha (pial - white)), so
+#   the signed volume is a cubic polynomial in alpha, whose roots in [0, 1] are found exactly
+#   (equidist_cubic, cubic_roots_in_unit_interval).
+# - Equi-volume: each vertex moves with its own alpha_i(beta). If the equi-distance plane at alpha* passes through
+#   p, an equi-volume plane with all alpha_i <= alpha* passes on the white side of p and one with all
+#   alpha_i >= alpha* on the pial side, so the equi-volume depth lies between the smallest and largest of the
+#   vertices' volume fractions at alpha*, beta_i(alpha*) (closed form, beta_from_alpha_quadratic), and is found
+#   by a bracketed root search (equivol_root). Points whose equi-volume and equi-distance prisms differ (close
+#   to a side face of a prism) are handled by a general search over [0, 1] (equivol_search).
+# ----------------------------------------------------------------------------------------------------------------
+@jit(nopython=True, cache=True)
+def equidist_cubic(p, a1, b1, c1, a2, b2, c2):
+    """Coefficients (k0, k1, k2, k3) of the signed volume plane_side(p, *equidist_plane(..., alpha)),
+    which is the cubic polynomial k0 + k1 alpha + k2 alpha^2 + k3 alpha^3."""
+    da = a2 - a1
+    e1, d1 = b1 - a1, (b2 - b1) - da
+    e2, d2 = c1 - a1, (c2 - c1) - da
+    q = p - a1
+    # (q - alpha da) . ((e1 + alpha d1) x (e2 + alpha d2))
+    n0 = np.cross(e1, e2)
+    n1 = np.cross(e1, d2) + np.cross(d1, e2)
+    n2 = np.cross(d1, d2)
+    return np.dot(q, n0), np.dot(q, n1) - np.dot(da, n0), np.dot(q, n2) - np.dot(da, n1), -np.dot(da, n2)
+
+
+@jit(nopython=True, cache=True)
+def _cubic(k0, k1, k2, k3, x):
+    return ((k3 * x + k2) * x + k1) * x + k0
+
+
+@jit(nopython=True, cache=True)
+def _cubic_root_bracketed(k0, k1, k2, k3, lo, hi):
+    """Root of a cubic that changes sign between lo and hi (safeguarded Newton)."""
+    f_lo = _cubic(k0, k1, k2, k3, lo)
+    x = 0.5 * (lo + hi)
+    for _ in range(100):
+        fx = _cubic(k0, k1, k2, k3, x)
+        if fx == 0:
+            return x
+        if (fx < 0) == (f_lo < 0):
+            lo, f_lo = x, fx
+        else:
+            hi = x
+        if hi - lo < 1e-15:
+            break
+        dfx = (3 * k3 * x + 2 * k2) * x + k1
+        x_new = x - fx / dfx if dfx != 0 else 0.5 * (lo + hi)
+        if not (lo < x_new < hi):
+            x_new = 0.5 * (lo + hi)
+        x = x_new
+    return x
+
+
+@jit(nopython=True, cache=True)
+def cubic_roots_in_unit_interval(k0, k1, k2, k3):
+    """Real roots in [0, 1] of k0 + k1 x + k2 x^2 + k3 x^3, in increasing order (array of length 3, number of roots).
+    [0, 1] is split at the roots of the derivative into intervals on which the cubic is monotone, and each sign
+    change is solved by safeguarded Newton."""
+    cuts = np.empty(4)
+    cuts[0] = 0.0
+    n_cuts = 1
+    a, b, c = 3 * k3, 2 * k2, k1  # derivative a x^2 + b x + c
+    crit = np.empty(2)
+    n_crit = 0
+    if a != 0:
+        disc = b * b - 4 * a * c
+        if disc > 0:
+            r = np.sqrt(disc)
+            x1, x2 = (-b - r) / (2 * a), (-b + r) / (2 * a)
+            crit[0], crit[1] = min(x1, x2), max(x1, x2)
+            n_crit = 2
+    elif b != 0:
+        crit[0] = -c / b
+        n_crit = 1
+    for i in range(n_crit):
+        if 0 < crit[i] < 1:
+            cuts[n_cuts] = crit[i]
+            n_cuts += 1
+    cuts[n_cuts] = 1.0
+    n_cuts += 1
+    roots = np.empty(3)
+    n_roots = 0
+    for i in range(n_cuts - 1):
+        lo, hi = cuts[i], cuts[i + 1]
+        f_lo, f_hi = _cubic(k0, k1, k2, k3, lo), _cubic(k0, k1, k2, k3, hi)
+        if f_lo == 0:
+            if n_roots == 0 or roots[n_roots - 1] != lo:
+                roots[n_roots] = lo
+                n_roots += 1
+        elif f_hi != 0 and (f_lo < 0) != (f_hi < 0):
+            roots[n_roots] = _cubic_root_bracketed(k0, k1, k2, k3, lo, hi)
+            n_roots += 1
+        if n_roots == 3:
+            break
+    if n_roots < 3 and _cubic(k0, k1, k2, k3, 1.0) == 0 and (n_roots == 0 or roots[n_roots - 1] != 1.0):
+        roots[n_roots] = 1.0
+        n_roots += 1
+    return roots, n_roots
+
+
+@jit(nopython=True, cache=True)
+def beta_from_alpha_quadratic(alpha, aw, ap, am):
+    """Volume fraction below the distance fraction alpha under the quadratic area model (inverse of
+    alpha_from_beta_quadratic): V(alpha) / V(1) with V(alpha) = aw alpha + (am - aw) alpha^2
+    + (aw - 2 am + ap) alpha^3 / 3. Falls back to alpha for degenerate areas."""
+    c1, c2, c3 = aw, am - aw, (aw - 2 * am + ap) / 3
+    total = c1 + c2 + c3
+    if total <= 0:
+        return alpha
+    return ((c3 * alpha + c2) * alpha + c1) * alpha / total
+
+
+@jit(nopython=True, cache=True)
+def equivol_side(p, a1, b1, c1, a2, b2, c2, beta, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c):
+    ma, mb, mc = equivol_plane(a1, b1, c1, a2, b2, c2, beta, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c)
+    return plane_side(p, ma, mb, mc)
+
+
+@jit(nopython=True, cache=True)
+def equivol_root(p, a1, b1, c1, a2, b2, c2, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c, lo, hi):
+    """Equi-volume depth beta in [lo, hi] at which the intermediate plane passes through p (Illinois method),
+    or NaN if the signed volume does not change sign in [lo, hi]."""
+    f_lo = equivol_side(p, a1, b1, c1, a2, b2, c2, lo, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c)
+    if f_lo == 0:
+        return lo
+    f_hi = equivol_side(p, a1, b1, c1, a2, b2, c2, hi, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c)
+    if f_hi == 0:
+        return hi
+    if (f_lo < 0) == (f_hi < 0):
+        return np.nan
+    side = 0
+    x = lo
+    for _ in range(200):
+        x = (lo * f_hi - hi * f_lo) / (f_hi - f_lo)
+        if not (lo < x < hi):
+            x = 0.5 * (lo + hi)
+        fx = equivol_side(p, a1, b1, c1, a2, b2, c2, x, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c)
+        if fx == 0 or hi - lo < 1e-14:
+            return x
+        if (fx < 0) == (f_hi < 0):
+            hi, f_hi = x, fx
+            if side == -1:
+                f_lo *= 0.5
+            side = -1
+        else:
+            lo, f_lo = x, fx
+            if side == 1:
+                f_hi *= 0.5
+            side = 1
+    return x
+
+
+@jit(nopython=True, cache=True)
+def equivol_search(p, a1, b1, c1, a2, b2, c2, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c):
+    """General search for an equi-volume depth in [0, 1] at which p lies inside the intermediate triangle
+    (sign changes of the signed volume on a grid of 32 intervals); NaN if there is none."""
+    n = 32
+    for i in range(n):
+        beta = equivol_root(p, a1, b1, c1, a2, b2, c2, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c,
+                            i / n, (i + 1) / n)
+        if not np.isnan(beta):
+            ma, mb, mc = equivol_plane(a1, b1, c1, a2, b2, c2, beta, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c,
+                                       am_a, am_b, am_c)
+            if test_point_inside_triangle(p, ma, mb, mc):
+                return beta
+    return np.nan
+
+
+# Candidate prisms whose equi-distance triangle through p misses p by more than this (smallest barycentric
+# coordinate below -NEAR_PRISM_MARGIN) are not searched for an equi-volume intersection.
+NEAR_PRISM_MARGIN = 0.5
+
+
+@jit(nopython=True, cache=True)
+def min_barycentric(p, a, b, c):
+    """Smallest barycentric coordinate of the projection of p onto the plane of triangle (a, b, c)
+    (negative outside the triangle)."""
+    n = np.cross(b - a, c - a)
+    nn = np.dot(n, n)
+    if nn == 0:
+        return -np.inf
+    la = np.dot(np.cross(b - p, c - p), n) / nn
+    lb = np.dot(np.cross(c - p, a - p), n) / nn
+    return min(la, lb, 1 - la - lb)
+
+
+@jit(nopython=True, cache=True)
+def depth_at_point(p, candidates, faces, vertices_white, vertices_pial, area_white, area_pial, area_m, equivol):
+    """Depth of point p and index of the first candidate prism that contains it (candidates end at the first -1
+    entry, if any); (NaN, -1) if p lies in none of them. If prisms overlap (as can happen with real surfaces),
+    the first candidate containing p is used, as in vdfs <= 1.1. area_m: middle coefficients of the quadratic
+    area model per vertex ((aw + ap) / 2 for the linear area model)."""
+    fallback_depth, fallback_prism = np.nan, -1
+    for k in range(candidates.shape[0]):
+        prism = candidates[k]
+        if prism < 0:
+            break
+        ia, ib, ic = faces[prism, 0], faces[prism, 1], faces[prism, 2]
+        a1, b1, c1 = vertices_white[ia], vertices_white[ib], vertices_white[ic]
+        a2, b2, c2 = vertices_pial[ia], vertices_pial[ib], vertices_pial[ic]
+        k0, k1, k2, k3 = equidist_cubic(p, a1, b1, c1, a2, b2, c2)
+        roots, n_roots = cubic_roots_in_unit_interval(k0, k1, k2, k3)
+        inside_alpha = np.nan
+        near = False
+        for r in range(n_roots):
+            ma, mb, mc = equidist_plane(a1, b1, c1, a2, b2, c2, roots[r])
+            if test_point_inside_triangle(p, ma, mb, mc):
+                inside_alpha = roots[r]
+                break
+            if min_barycentric(p, ma, mb, mc) > -NEAR_PRISM_MARGIN:
+                near = True
+        if not equivol:
+            if not np.isnan(inside_alpha):
+                return inside_alpha, prism
+            continue
+        if np.isnan(inside_alpha) and not near:
+            continue
+        aw_a, aw_b, aw_c = area_white[ia], area_white[ib], area_white[ic]
+        ap_a, ap_b, ap_c = area_pial[ia], area_pial[ib], area_pial[ic]
+        am_a, am_b, am_c = area_m[ia], area_m[ib], area_m[ic]
+        beta = np.nan
+        if not np.isnan(inside_alpha):
+            # the equi-volume depth lies between the vertices' volume fractions at the equi-distance depth
+            beta_a = beta_from_alpha_quadratic(inside_alpha, aw_a, ap_a, am_a)
+            beta_b = beta_from_alpha_quadratic(inside_alpha, aw_b, ap_b, am_b)
+            beta_c = beta_from_alpha_quadratic(inside_alpha, aw_c, ap_c, am_c)
+            lo, hi = min(beta_a, beta_b, beta_c), max(beta_a, beta_b, beta_c)
+            if hi - lo < 1e-15:
+                beta = lo
+            else:
+                beta = equivol_root(p, a1, b1, c1, a2, b2, c2, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c,
+                                    lo, hi)
+            if not np.isnan(beta):
+                ma, mb, mc = equivol_plane(a1, b1, c1, a2, b2, c2, beta, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c,
+                                           am_a, am_b, am_c)
+                if test_point_inside_triangle(p, ma, mb, mc):
+                    return beta, prism
+                if np.isnan(fallback_depth):
+                    fallback_depth, fallback_prism = beta, prism
+        # close to a side face, the equi-volume triangle can contain p although the equi-distance one does not
+        # (and vice versa): general search in this prism
+        beta = equivol_search(p, a1, b1, c1, a2, b2, c2, aw_a, aw_b, aw_c, ap_a, ap_b, ap_c, am_a, am_b, am_c)
+        if not np.isnan(beta):
+            return beta, prism
+    return fallback_depth, fallback_prism
+
+
+@jit(nopython=True, parallel=True, cache=True)
+def depths_on_grid(roi, bounding_prisms, faces, vertices_white, vertices_pial, area_white, area_pial, area_m,
+                   equivol):
+    """Depths and prism indices (NaN if none) of the grid points roi (n x 3 integer grid coordinates), in parallel."""
+    n = roi.shape[0]
+    depths = np.empty(n)
+    prisms = np.empty(n)
+    for i in prange(n):
+        x, y, z = roi[i, 0], roi[i, 1], roi[i, 2]
+        p = np.array([float(x), float(y), float(z)])
+        d, prism = depth_at_point(p, bounding_prisms[x, y, z], faces, vertices_white, vertices_pial,
+                                  area_white, area_pial, area_m, equivol)
+        depths[i] = d
+        prisms[i] = prism if prism >= 0 else np.nan
+    return depths, prisms
+
+
+def _middle_coefficients(area_white, area_pial, area_mid):
+    """Middle coefficients of the quadratic area model, a_m = 2 a_mid - (a_w + a_p) / 2; without midthickness
+    areas a_m = (a_w + a_p) / 2 (linear area model)."""
+    if area_mid is None:
+        return (area_white + area_pial) / 2
+    return 2 * np.asarray(area_mid, dtype=np.float64) - (area_white + area_pial) / 2
+
+
+def calc_depth_from_surfaces_voxelidx(voxelidx,
                                       faces, vertices_white, vertices_pial, area_white, area_pial,
                                       bounding_prisms, p=None, method='equivol', area_mid=None):
     """
-    This is the main function that calculates the depth of a voxel with coordinates given by p.
-    It numerically solves an intersection equation for the voxel center with a parametrization
-    of triangular planes that move between the white and pial faces of the prisms that potentially
-    contain the voxel and checks wheter this intersection in inside the triangle. The parametrization is 
-    either based on equi-volume or equi-distance depth. The candidate prisms are given by the bounding_prisms
-    entry with 3D index voxelidx. If p is None then it is assumed that voxelidx is the voxel center
-    in voxel grid coordinates. This is generally the case when we compute the depths for all voxels in a grid.
-    In that case we use that grid and its resolution to determine the bounding prisms. If p is not None
-    bounding_prisms should have been calculated for a grid of arbitrary resolution that contains the point p and 
-    the voxelidx is the artifical voxel within wich p is contained.
-    As soon as a solution is found that is inside the prism, the depth is returned.
-    For method="equivol", area_mid (vertex areas of the midthickness surface) selects the quadratic area model;
-    without it, the linear-area model is used (see alpha_from_beta_quadratic).
+    Calculates the depth of a point p (and the index of the prism that contains it) from the candidate prisms
+    in the bounding_prisms entry with 3D index voxelidx. If p is None, voxelidx is the point (a voxel center in
+    voxel grid coordinates, the case when depths are calculated for all voxels of a grid). Otherwise
+    bounding_prisms should have been calculated for a grid of arbitrary resolution that contains p, and voxelidx
+    is the grid voxel within which p lies (e.g. for streamline points).
+    The depth is that of the intermediate surface (equi-distance or equi-volume) that passes through p within
+    the prism, see depth_at_point. For method="equivol", area_mid (vertex areas of the midthickness surface)
+    selects the quadratic area model; without it, the linear-area model is used (see alpha_from_beta_quadratic).
+    Returns (depth, prism index), or (NaN, NaN) if p lies in none of the candidate prisms.
     """
     if method not in ("equivol", "equidist"):
         raise ValueError(f"method must be 'equivol' or 'equidist', not {method!r}")
     x_idx, y_idx, z_idx = voxelidx
     if p is None:
         p = np.array(voxelidx)
-    prism_idx = 0
-    # go through all prisms that potentially contain the voxel
-    # (check the list length first, a full list has no -1 sentinel at its end)
-    while (prism_idx < bounding_prisms.shape[3]
-           and bounding_prisms[x_idx, y_idx, z_idx, prism_idx] != -1):
-        # get vertices of the prism 
-        canditate_prism_idx = bounding_prisms[x_idx, y_idx, z_idx, prism_idx]
-        a1 = vertices_white[faces[canditate_prism_idx, 0], :]
-        b1 = vertices_white[faces[canditate_prism_idx, 1], :]
-        c1 = vertices_white[faces[canditate_prism_idx, 2], :]
-        a2 = vertices_pial[faces[canditate_prism_idx, 0], :]
-        b2 = vertices_pial[faces[canditate_prism_idx, 1], :]
-        c2 = vertices_pial[faces[canditate_prism_idx, 2], :]
-
-        # setup the depth plane function based on the method
-        if method == "equivol":
-            aw_a = area_white[faces[canditate_prism_idx, 0]]
-            aw_b = area_white[faces[canditate_prism_idx, 1]]
-            aw_c = area_white[faces[canditate_prism_idx, 2]]
-            ap_a = area_pial[faces[canditate_prism_idx, 0]]
-            ap_b = area_pial[faces[canditate_prism_idx, 1]]
-            ap_c = area_pial[faces[canditate_prism_idx, 2]]
-            # middle coefficient of the quadratic area model (linear-area model without midthickness areas)
-            if area_mid is None:
-                am_a, am_b, am_c = (aw_a + ap_a) / 2, (aw_b + ap_b) / 2, (aw_c + ap_c) / 2
-            else:
-                am_a = 2 * area_mid[faces[canditate_prism_idx, 0]] - (aw_a + ap_a) / 2
-                am_b = 2 * area_mid[faces[canditate_prism_idx, 1]] - (aw_b + ap_b) / 2
-                am_c = 2 * area_mid[faces[canditate_prism_idx, 2]] - (aw_c + ap_c) / 2
-
-            depth_plane_function = lambda beta: equivol_plane(a1, b1, c1, a2, b2, c2, beta,
-                                                              aw_a, aw_b, aw_c,
-                                                              ap_a, ap_b, ap_c,
-                                                              am_a, am_b, am_c)
-        elif method == "equidist":
-            depth_plane_function = lambda alpha: equidist_plane(a1, b1, c1, a2, b2, c2, alpha)
-        # find depth through voxel center 
-        # (by solving intersection equation and checking if the intersection is inside the prism)
-        d = find_depth_through_point(p, depth_plane_function)
-
-        if d is not None:
-            return d, float(canditate_prism_idx)
-
-        prism_idx = prism_idx + 1
-    return np.nan, np.nan
+    area_white = np.asarray(area_white, dtype=np.float64)
+    area_pial = np.asarray(area_pial, dtype=np.float64)
+    d, prism = depth_at_point(np.asarray(p, dtype=np.float64), bounding_prisms[x_idx, y_idx, z_idx],
+                              np.asarray(faces, dtype=np.int64), np.asarray(vertices_white, dtype=np.float64),
+                              np.asarray(vertices_pial, dtype=np.float64), area_white, area_pial,
+                              _middle_coefficients(area_white, area_pial, area_mid), method == "equivol")
+    if prism < 0:
+        return np.nan, np.nan
+    return d, float(prism)
 
 
 @jit(nopython=True)
@@ -483,11 +718,13 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
     White and pial surface need to have the same vertices and triangles (i.e. correspond to each other),
     vertex areas need to be provided for all surface vertices. For method="equivol", area_mid (vertex areas of
     the midthickness surface, see calc_mid_vertex_area) selects the quadratic area model; without it, the
-    linear-area model is used.
+    linear-area model is used. n_jobs: number of threads.
     Returns depths and columns, the index of the triangle (prism) that contains each voxel center. If the
     surfaces contain the original triangle indices ("tris_idx", e.g. when restricted to a label),
     these are used for the columns.
     """
+    if method not in ("equivol", "equidist"):
+        raise ValueError(f"method must be 'equivol' or 'equidist', not {method!r}")
     if surf_white["nVertices"] != surf_pial["nVertices"] or not np.array_equal(
             surf_white["tris"], surf_pial["tris"]):
         raise ValueError("white and pial surfaces need to have the same vertices and triangles")
@@ -496,9 +733,11 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
     if area_mid is not None and len(area_mid) != surf_white["nVertices"]:
         raise ValueError("number of midthickness vertex areas does not match number of surface vertices")
 
-    faces = surf_pial["tris"]
-    vertices_white = surf_white["vertices"]
-    vertices_pial = surf_pial["vertices"]
+    faces = np.asarray(surf_pial["tris"], dtype=np.int64)
+    vertices_white = np.asarray(surf_white["vertices"], dtype=np.float64)
+    vertices_pial = np.asarray(surf_pial["vertices"], dtype=np.float64)
+    area_white = np.asarray(area_white, dtype=np.float64)
+    area_pial = np.asarray(area_pial, dtype=np.float64)
 
     # For each voxel, calculate a list of prism indices that potentially contain the voxel
     # so that we only to solve intersection equations for these prisms
@@ -509,31 +748,19 @@ def calc_depth_from_surfaces_on_grid(surf_white, area_white, surf_pial, area_pia
     # only need to calculate depths for voxels that potentially are inside a prism
     # (lists are filled from the start, so the first entry is used if any is)
     roi = np.argwhere(bounding_prisms[:, :, :, 0] != -1)
+    depths = np.full((n_x, n_y, n_z), np.nan)
+    columns = np.full((n_x, n_y, n_z), np.nan)
     if len(roi) == 0:
-        return np.full((n_x, n_y, n_z), np.nan), np.full((n_x, n_y, n_z), np.nan)
+        return depths, columns
 
-    # calculate depths in parallel by calling calc_depth_from_surfaces_voxelidx for each voxel
-    # in the roi
-    with parallel_backend("loky", inner_max_num_threads=1):
-        results = List(
-            Parallel(n_jobs=n_jobs)(
-                delayed(
-                    lambda roi_idx: calc_depth_from_surfaces_voxelidx(
-                        roi_idx,
-                        faces,
-                        vertices_white,
-                        vertices_pial,
-                        area_white,
-                        area_pial,
-                        bounding_prisms,
-                        None,
-                        method,
-                        area_mid)
-                )(roi_idx) for roi_idx in roi))
-
-    # take results from parallel calculation and assign them to the correct voxel in the grid
-    depths, columns = numba_assign_calc_depth_results(
-        results, roi, bounding_prisms.shape[:3])
+    # calculate depths in parallel (numba threads)
+    set_num_threads(max(1, min(n_jobs, config.NUMBA_NUM_THREADS)))
+    roi_depths, roi_prisms = depths_on_grid(roi, bounding_prisms, faces, vertices_white, vertices_pial,
+                                            area_white, area_pial,
+                                            _middle_coefficients(area_white, area_pial, area_mid),
+                                            method == "equivol")
+    depths[roi[:, 0], roi[:, 1], roi[:, 2]] = roi_depths
+    columns[roi[:, 0], roi[:, 1], roi[:, 2]] = roi_prisms
 
     # translate prism indices into original triangle indices
     if "tris_idx" in surf_pial:

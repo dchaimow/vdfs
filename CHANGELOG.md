@@ -6,6 +6,13 @@ Changes of results:
 - **Equi-volume depths: corrected formula.** `alpha_from_beta` now uses the linear-area model of Waehnert et al. (2014, Eq. 10), as in surface_tools by K. Wagstyl. The formula used since the first version, alpha = (2 ap beta - ap beta^2 + aw beta^2) / (ap + aw), was the inverse of the surface_tools function (distance fraction to volume fraction, measured from the pial surface). It agrees with the correct relation only to first order in the white/pial area difference and gave too many voxels at mid-depth and too few near the surfaces; in synthetic tests (`validation/`) its depth errors were about twice as large (rms up to 0.027, max up to 0.050 at strongly curved cortex).
 - **Equi-volume depths: quadratic area model (new default).** The cross-sectional area of a column is modelled as quadratic in the distance fraction, using the vertex areas of the white, midthickness and pial surfaces. This is exact for the prism geometry vdfs uses and also accounts for curvature in two directions, which the linear model leaves out (see README, Equi-volume model). The linear model remains available with `area_model="linear"`.
 
+Performance:
+- The intersection of each voxel center with the intermediate surfaces is now calculated in compiled code (numba), in parallel over voxels (numba threads instead of joblib processes): about 10-50 times faster.
+  - Equi-distance: the condition that the intermediate plane passes through the point is a cubic polynomial in the depth, whose roots in [0, 1] are calculated exactly (`equidist_cubic`, `cubic_roots_in_unit_interval`) instead of numerically with scipy.
+  - Equi-volume: the depth lies between the vertices' volume fractions at the equi-distance depth (closed form, `beta_from_alpha_quadratic`) and is found by a bracketed root search (`equivol_root`); near a prism's side faces a general search is used (`equivol_search`).
+  - Results are the same as before to within 1e-9 (synthetic validation and a real FreeSurfer subject). If prisms overlap, the first candidate prism containing the point is still used.
+- joblib is no longer a dependency. `find_depth_through_point` (scipy) is kept but no longer used.
+
 New:
 - `area_model` argument (`"quadratic"`, default, or `"linear"`) for `voxeldepths_from_surfaces` and `process_voxeldepth_from_surfaces`; `area_mid` argument for `calc_depth_from_surfaces_on_grid` and `calc_depth_from_surfaces_voxelidx` (without it, the linear model is used).
 - `alpha_from_beta_quadratic()`, `calc_mid_vertex_area()`.

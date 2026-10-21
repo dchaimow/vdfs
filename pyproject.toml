@@ -9,7 +9,7 @@ description = "Voxel depths from surfaces: equi-volume and equi-distance cortica
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "Denis Chaimow" }]
-dependencies = ["numpy", "scipy", "nibabel", "numba", "joblib"]
+dependencies = ["numpy", "scipy", "nibabel", "numba"]
 
 [project.optional-dependencies]
 test = ["pytest"]

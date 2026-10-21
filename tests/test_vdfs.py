@@ -243,3 +243,18 @@ def test_alpha_from_beta_quadratic_linear_special_case():
     for aw, ap in ((1.0, 4.0), (4.0, 1.0), (0.7, 0.7)):
         for beta in np.linspace(0, 1, 11):
             assert vdfs.alpha_from_beta_quadratic(beta, aw, ap, (aw + ap) / 2) == vdfs.alpha_from_beta(beta, aw, ap)
+
+
+def test_overlapping_prisms_first_candidate_wins():
+    # two prisms with the same white triangle but different pial triangles both contain the point;
+    # as in vdfs <= 1.1, the first candidate prism that contains the point is used
+    white = np.array([[0.0, 0, 0], [4, 0, 0], [0, 4, 0], [0.0, 0, 0], [4, 0, 0], [0, 4, 0]])
+    pial = white + [0, 0, 2.0]
+    pial[3:] = white[3:] + [0, 0, 4.0]
+    faces = np.array([[0, 1, 2], [3, 4, 5]])
+    p = np.array([1.0, 1.0, 1.0])
+    for method in ("equidist", "equivol"):
+        for order, (prism, depth) in (([0, 1], (0, 0.5)), ([1, 0], (1, 0.25))):
+            d, c = vdfs.calc_depth_from_surfaces_voxelidx((0, 0, 0), faces, white, pial, np.ones(6), np.ones(6),
+                                                          np.array([[[order]]]), p=p, method=method)
+            assert c == prism and d == pytest.approx(depth)

@@ -11,7 +11,7 @@ Install into the Python environment (or container) in which it will be used, pre
 pip install "git+https://github.com/dchaimow/vdfs@v1.1.0"
 ```
 
-Dependencies (numpy, scipy, nibabel, numba, joblib) are installed automatically. For development, clone the repository and install it in editable mode:
+Dependencies (numpy, scipy, nibabel, numba) are installed automatically. For development, clone the repository and install it in editable mode:
 
 ```bash
 git clone https://github.com/dchaimow/vdfs
@@ -52,7 +52,7 @@ nii_depths, nii_columns = vdfs.voxeldepths_from_surfaces(
 
 `upsample_factor` : upsampling factor (if desired), default=None
 
-`n_jobs`: number of cpus to run in parallel
+`n_jobs`: number of threads to run in parallel
 
 `force`: if True, generate output files even if they already exist (otherwise existing output files are loaded and returned)
 

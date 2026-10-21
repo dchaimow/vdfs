@@ -8,7 +8,7 @@ Python code that uses white matter and pial surfaces to calculate voxel-wise rel
 Install into the Python environment (or container) in which it will be used, preferably pinned to a release tag:
 
 ```bash
-pip install "git+https://github.com/dchaimow/vdfs@v1.1.0"
+pip install "git+https://github.com/dchaimow/vdfs@v2.0.0"
 ```
 
 Dependencies (numpy, scipy, nibabel, numba) are installed automatically. For development, clone the repository and install it in editable mode:

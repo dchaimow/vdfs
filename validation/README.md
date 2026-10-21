@@ -32,7 +32,7 @@ Then:
 ./run_all.sh results /path/to/LN2_LAYERS
 ```
 
-This takes about 35 minutes (vdfs runs with 10 parallel jobs) and writes to `results/`:
+This takes about 5 minutes (vdfs runs with 10 threads) and writes to `results/`:
 
 - `out/`, `out_aligned_grid/`: vdfs depths and columns (`.npz`)
 - `out_ln2_vdfs_box/`, `out_ln2_large_box/`, `out_rim_variants/`: LayNii rims and outputs (`.nii`)

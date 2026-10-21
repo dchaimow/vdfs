@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased (2.0.0)
+## 2.0.0
+
+All equi-volume depths change compared with 1.x (corrected formula and new default area model); equi-distance depths are unchanged (except for points exactly on prism boundaries, which now get a depth). To reproduce results of earlier versions, install them (e.g. `pip install "git+https://github.com/dchaimow/vdfs@v1.1.0"`).
 
 Changes of results:
 - **Equi-volume depths: corrected formula.** `alpha_from_beta` now uses the linear-area model of Waehnert et al. (2014, Eq. 10), as in surface_tools by K. Wagstyl. The formula used since the first version, alpha = (2 ap beta - ap beta^2 + aw beta^2) / (ap + aw), was the inverse of the surface_tools function (distance fraction to volume fraction, measured from the pial surface). It agrees with the correct relation only to first order in the white/pial area difference and gave too many voxels at mid-depth and too few near the surfaces; in synthetic tests (`validation/`) its depth errors were about twice as large (rms up to 0.027, max up to 0.050 at strongly curved cortex).
@@ -13,10 +15,14 @@ Performance:
   - Results are the same as before to within 1e-9 (synthetic validation and a real FreeSurfer subject). If prisms overlap, the first candidate prism containing the point is still used.
 - joblib is no longer a dependency. `find_depth_through_point` (scipy) is kept but no longer used.
 
+Updating from 1.x:
+- `voxeldepths_from_surfaces` and `process_voxeldepth_from_surfaces` work as before; equi-volume depths now use the quadratic area model (`area_model="linear"` for the corrected linear model).
+- `calc_depth_from_surfaces_on_grid` and `calc_depth_from_surfaces_voxelidx` keep their arguments; without the new `area_mid` argument they use the linear area model. `n_jobs` now sets the number of numba threads.
+- `equivol_plane` takes three additional arguments (middle coefficients of the quadratic area model).
+
 New:
 - `area_model` argument (`"quadratic"`, default, or `"linear"`) for `voxeldepths_from_surfaces` and `process_voxeldepth_from_surfaces`; `area_mid` argument for `calc_depth_from_surfaces_on_grid` and `calc_depth_from_surfaces_voxelidx` (without it, the linear model is used).
 - `alpha_from_beta_quadratic()`, `calc_mid_vertex_area()`.
-- `equivol_plane()` takes the middle coefficients of the quadratic area model as three additional arguments.
 
 Fixes:
 - Points lying exactly on a boundary between prisms (e.g. voxel centres on a mesh symmetry plane) could get no depth, because rounding placed them marginally outside every adjacent intermediate triangle. Points within a tiny tolerance of a triangle edge (`EDGE_TOLERANCE`, 1e-6 of the edge length) now count as inside (#10).
